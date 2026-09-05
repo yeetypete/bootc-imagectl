@@ -15,6 +15,7 @@ use crate::cli::FinalizeOpts;
 use crate::distro;
 
 mod identity;
+mod layout;
 
 /// Run the `finalize` subcommand.
 ///
@@ -27,5 +28,6 @@ pub fn finalize(_opts: FinalizeOpts) -> Result<()> {
     let distro = distro::detect(&root).context("detecting the distribution")?;
     info!("finalizing a {} rootfs", distro.name());
     identity::remove_machine_identity(&root, distro).context("removing machine identity")?;
+    layout::layout_toplevel(&root).context("laying out the toplevel")?;
     Ok(())
 }
