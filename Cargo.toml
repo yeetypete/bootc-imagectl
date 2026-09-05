@@ -1,0 +1,33 @@
+[package]
+name = "bootc-imagectl"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Finalize and install composefs bootc images."
+repository = "https://github.com/yeetypete/bootc-imagectl"
+license = "MIT"
+keywords = ["arch", "bootc", "composefs", "debian", "image"]
+categories = ["command-line-utilities"]
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.clippy]
+dbg_macro = "warn"
+exit = "warn"
+pedantic = "warn"
+print_stderr = "warn"
+todo = "warn"
+
+[lints.rust]
+missing_debug_implementations = "warn"
+unsafe_code = "forbid"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
