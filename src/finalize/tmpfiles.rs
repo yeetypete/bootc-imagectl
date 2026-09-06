@@ -1,5 +1,11 @@
 //! Patch the tmpfiles.d(5) files systemd ships to match the toplevel symlinks
-//! (see layout.rs).
+//! (see layout.rs). Also read which paths the tmpfiles.d files in the image
+//! declare, so the generated /var entries (see var.rs) do not repeat them.
+
+use std::collections::HashSet;
+use std::ffi::OsStr;
+use std::fmt::Write;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use cap_std_ext::cap_std::fs::Dir;
@@ -7,7 +13,79 @@ use cap_std_ext::dirext::CapStdExtDirExt;
 use tracing::debug;
 
 /// Where packages install their tmpfiles.d files. Generated files go here too.
-pub(super) const USR_DIR: &str = "usr/lib/tmpfiles.d";
+pub(super) const USR_TMPFILES_DIR: &str = "usr/lib/tmpfiles.d";
+
+/// Where administrators put their own tmpfiles.d files.
+const ETC_TMPFILES_DIR: &str = "etc/tmpfiles.d";
+
+/// Specifiers systemd expands to a directory at the start of a tmpfiles.d
+/// path.
+const PATH_SPECIFIERS: &[(&str, &str)] = &[
+    ("%C", "/var/cache"),
+    ("%E", "/etc"),
+    ("%L", "/var/log"),
+    ("%S", "/var/lib"),
+    ("%T", "/tmp"),
+    ("%t", "/run"),
+    ("%V", "/var/tmp"),
+];
+
+/// Escape a path for a tmpfiles.d line.
+pub(super) fn escape_path(path: &str) -> String {
+    let mut escaped = String::with_capacity(path.len());
+    for c in path.chars() {
+        match c {
+            ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r' | '\\' | '\'' | '"' => {
+                let _ = write!(escaped, "\\x{:02x}", u32::from(c));
+            }
+            '%' => escaped.push_str("%%"),
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+/// The path field of a tmpfiles.d line, or `None` for a comment or blank line.
+pub(super) fn entry_path(line: &str) -> Option<&str> {
+    let mut fields = line.split_whitespace();
+    if fields.next()?.starts_with('#') {
+        return None;
+    }
+    fields.next()
+}
+
+/// Expand the systemd specifier a tmpfiles.d path starts with, if any.
+fn expand_specifier(path: &str) -> String {
+    PATH_SPECIFIERS
+        .iter()
+        .find_map(|(specifier, target)| {
+            let rest = path.strip_prefix(specifier)?;
+            (rest.is_empty() || rest.starts_with('/')).then(|| format!("{target}{rest}"))
+        })
+        .unwrap_or_else(|| path.to_owned())
+}
+
+/// Every path the tmpfiles.d files in the image declare.
+pub(super) fn declared_paths(root: &Dir) -> Result<HashSet<String>> {
+    let mut declared = HashSet::new();
+    for dir in [USR_TMPFILES_DIR, ETC_TMPFILES_DIR] {
+        let Some(confs) = root.open_dir_optional(dir)? else {
+            continue;
+        };
+        for entry in confs.entries()? {
+            let entry = entry?;
+            let name = entry.file_name();
+            if Path::new(&name).extension() != Some(OsStr::new("conf")) {
+                continue;
+            }
+            let content = confs
+                .read_to_string(&name)
+                .with_context(|| format!("reading /{dir}/{}", name.display()))?;
+            declared.extend(content.lines().filter_map(entry_path).map(expand_specifier));
+        }
+    }
+    Ok(declared)
+}
 
 /// Patch the tmpfiles.d files systemd ships to match the toplevel symlinks.
 pub(super) fn patch_tmpfiles(root: &Dir) -> Result<()> {
@@ -16,14 +94,14 @@ pub(super) fn patch_tmpfiles(root: &Dir) -> Result<()> {
     // home.conf turns /home and /srv into real directories, which conflicts
     // with the /home -> var/home and /srv -> var/srv symlinks. Nothing else in
     // the file applies.
-    root.remove_file_optional(format!("{USR_DIR}/home.conf"))
+    root.remove_file_optional(format!("{USR_TMPFILES_DIR}/home.conf"))
         .context("removing home.conf")?;
 
     // provision.conf writes the credential-provisioned root ssh key to /root,
     // now a symlink to /var/roothome. Point it there directly. Drop its
     // /var/roothome line, since the image declares that directory itself and
     // systemd warns about duplicates at boot.
-    let provision = format!("{USR_DIR}/provision.conf");
+    let provision = format!("{USR_TMPFILES_DIR}/provision.conf");
     if let Some(content) = root
         .read_to_string_optional(&provision)
         .context("reading provision.conf")?
@@ -48,21 +126,24 @@ mod tests {
     #[test]
     fn removes_home_conf() -> Result<()> {
         let root = rootfs()?;
-        root.create_dir_all(USR_DIR)?;
-        root.write(format!("{USR_DIR}/home.conf"), "Q /home 0755 - - -\n")?;
+        root.create_dir_all(USR_TMPFILES_DIR)?;
+        root.write(
+            format!("{USR_TMPFILES_DIR}/home.conf"),
+            "Q /home 0755 - - -\n",
+        )?;
 
         patch_tmpfiles(&root)?;
 
-        assert!(!root.exists(format!("{USR_DIR}/home.conf")));
+        assert!(!root.exists(format!("{USR_TMPFILES_DIR}/home.conf")));
         Ok(())
     }
 
     #[test]
     fn points_provision_conf_at_var_roothome() -> Result<()> {
         let root = rootfs()?;
-        root.create_dir_all(USR_DIR)?;
+        root.create_dir_all(USR_TMPFILES_DIR)?;
         root.write(
-            format!("{USR_DIR}/provision.conf"),
+            format!("{USR_TMPFILES_DIR}/provision.conf"),
             "# Provision SSH key for root\n\
              d- /root/.ssh :0700 root :root -\n\
              f^ /root/.ssh/authorized_keys :0600 root :root - ssh.authorized_keys.root\n\
@@ -72,7 +153,7 @@ mod tests {
         patch_tmpfiles(&root)?;
 
         assert_eq!(
-            root.read_to_string(format!("{USR_DIR}/provision.conf"))?,
+            root.read_to_string(format!("{USR_TMPFILES_DIR}/provision.conf"))?,
             "# Provision SSH key for root\n\
              d- /var/roothome/.ssh :0700 root :root -\n\
              f^ /var/roothome/.ssh/authorized_keys :0600 root :root - ssh.authorized_keys.root\n"
@@ -83,9 +164,9 @@ mod tests {
     #[test]
     fn is_idempotent() -> Result<()> {
         let root = rootfs()?;
-        root.create_dir_all(USR_DIR)?;
+        root.create_dir_all(USR_TMPFILES_DIR)?;
         root.write(
-            format!("{USR_DIR}/provision.conf"),
+            format!("{USR_TMPFILES_DIR}/provision.conf"),
             "d- /root/.ssh :0700 root :root -\nd- /var/roothome :0700 root :root -\n",
         )?;
 
@@ -93,7 +174,7 @@ mod tests {
         patch_tmpfiles(&root)?;
 
         assert_eq!(
-            root.read_to_string(format!("{USR_DIR}/provision.conf"))?,
+            root.read_to_string(format!("{USR_TMPFILES_DIR}/provision.conf"))?,
             "d- /var/roothome/.ssh :0700 root :root -\n"
         );
         Ok(())
@@ -104,5 +185,69 @@ mod tests {
         let root = rootfs()?;
         patch_tmpfiles(&root)?;
         Ok(())
+    }
+
+    #[test]
+    fn collects_declared_paths_from_both_directories() -> Result<()> {
+        let root = rootfs()?;
+        root.create_dir_all(USR_TMPFILES_DIR)?;
+        root.create_dir_all(ETC_TMPFILES_DIR)?;
+        root.write(
+            format!("{USR_TMPFILES_DIR}/var.conf"),
+            "# comment\n\nd /var/log 0755 - - -\nd %S/containers 0755 root root -\nL /var/lock - - - - ../run/lock\n",
+        )?;
+        root.write(
+            format!("{ETC_TMPFILES_DIR}/local.conf"),
+            "d /var/local/x 0755 - - -\n",
+        )?;
+        root.write(
+            format!("{USR_TMPFILES_DIR}/README"),
+            "d /var/not-a-conf 0755 - - -\n",
+        )?;
+
+        let declared = declared_paths(&root)?;
+
+        assert_eq!(
+            declared,
+            [
+                "/var/log",
+                "/var/lib/containers",
+                "/var/lock",
+                "/var/local/x"
+            ]
+            .map(String::from)
+            .into_iter()
+            .collect()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn extracts_entry_paths() {
+        assert_eq!(entry_path("d /var/log 0755 - - -"), Some("/var/log"));
+        assert_eq!(
+            entry_path("  L /var/lock - - - - ../run/lock"),
+            Some("/var/lock")
+        );
+        assert_eq!(entry_path("# d /commented 0755 - - -"), None);
+        assert_eq!(entry_path(""), None);
+        assert_eq!(entry_path("d"), None);
+    }
+
+    #[test]
+    fn escapes_paths_for_tmpfiles() {
+        assert_eq!(escape_path("/var/lib/plain"), "/var/lib/plain");
+        assert_eq!(
+            escape_path("/var/lib/with space\tand 'quotes' \"too\" 100%\\"),
+            "/var/lib/with\\x20space\\x09and\\x20\\x27quotes\\x27\\x20\\x22too\\x22\\x20100%%\\x5c"
+        );
+    }
+
+    #[test]
+    fn expands_leading_specifiers() {
+        assert_eq!(expand_specifier("%S/containers"), "/var/lib/containers");
+        assert_eq!(expand_specifier("%t"), "/run");
+        assert_eq!(expand_specifier("/var/lib/%S"), "/var/lib/%S");
+        assert_eq!(expand_specifier("%Z/unknown"), "%Z/unknown");
     }
 }

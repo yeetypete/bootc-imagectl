@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs::Dir;
 use tracing::info;
+use uzers::UsersCache;
 
 use crate::cli::FinalizeOpts;
 use crate::distro;
@@ -17,6 +18,7 @@ use crate::distro;
 mod identity;
 mod layout;
 mod tmpfiles;
+mod var;
 
 /// Run the `finalize` subcommand.
 ///
@@ -31,5 +33,8 @@ pub fn finalize(_opts: FinalizeOpts) -> Result<()> {
     identity::remove_machine_identity(&root, distro).context("removing machine identity")?;
     layout::layout_toplevel(&root).context("laying out the toplevel")?;
     tmpfiles::patch_tmpfiles(&root).context("patching tmpfiles.d")?;
+    var::write_var_tmpfiles(&root, &UsersCache::new())
+        .context("generating /var tmpfiles.d entries")?;
+    var::empty_var(&root).context("emptying /var")?;
     Ok(())
 }
