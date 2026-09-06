@@ -36,6 +36,9 @@ pub fn finalize(_opts: FinalizeOpts) -> Result<()> {
     initramfs::build_initramfs(&root).context("building the initramfs")?;
 
     identity::remove_machine_identity(&root, distro).context("removing machine identity")?;
+    distro
+        .remove_repository_indexes(&root)
+        .context("removing repository indexes")?;
     layout::layout_toplevel(&root).context("laying out the toplevel")?;
     tmpfiles::patch_tmpfiles(&root).context("patching tmpfiles.d")?;
     var::write_var_tmpfiles(&root, &UsersCache::new())

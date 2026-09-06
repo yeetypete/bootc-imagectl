@@ -20,6 +20,23 @@ pub trait Distro: std::fmt::Debug {
     ///
     /// Fails on any filesystem error in the rootfs.
     fn remove_machine_identity(&self, root: &Dir) -> Result<()>;
+
+    /// Delete the repository indexes the package manager downloaded during
+    /// the build. The database of installed packages is not removed.
+    ///
+    /// # Errors
+    ///
+    /// Fails on any filesystem error in the rootfs.
+    fn remove_repository_indexes(&self, root: &Dir) -> Result<()>;
+}
+
+/// The distribution an os-release `ID` or `ID_LIKE` entry names, if supported.
+fn from_id(id: &str) -> Option<&'static dyn Distro> {
+    match id {
+        "arch" => Some(&arch::Arch),
+        // Other distributions go here.
+        _ => None,
+    }
 }
 
 /// Detect the distribution from the rootfs's os-release.
@@ -35,15 +52,6 @@ pub fn detect(root: &Dir) -> Result<&'static dyn Distro> {
             release.id, release.id_like
         )
     })
-}
-
-/// The distribution an os-release `ID` or `ID_LIKE` entry names, if supported.
-fn from_id(id: &str) -> Option<&'static dyn Distro> {
-    match id {
-        "arch" => Some(&arch::Arch),
-        // Other distributions go here.
-        _ => None,
-    }
 }
 
 #[cfg(test)]

@@ -67,6 +67,10 @@ mod tests {
         fn remove_machine_identity(&self, _root: &Dir) -> Result<()> {
             Ok(())
         }
+
+        fn remove_repository_indexes(&self, _root: &Dir) -> Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
