@@ -146,7 +146,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_tmpfiles_for_the_directories() -> Result<()> {
+    fn writes_tmpfiles_for_directories() -> Result<()> {
         let root = rootfs()?;
         layout_toplevel(&root)?;
         let conf = root.read_to_string(format!(

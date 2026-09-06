@@ -84,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_through_the_etc_symlink() -> Result<()> {
+    fn reads_through_etc_symlink() -> Result<()> {
         let root = with_os_release("ID=debian\n")?;
         assert_eq!(read(&root)?.id, "debian");
         Ok(())

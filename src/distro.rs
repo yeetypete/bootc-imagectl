@@ -21,6 +21,14 @@ pub trait Distro: std::fmt::Debug {
     /// Fails on any filesystem error in the rootfs.
     fn remove_machine_identity(&self, root: &Dir) -> Result<()>;
 
+    /// Move the database of installed packages out of /var, which finalize
+    /// empties, to where the package manager finds it on the installed system.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the database is missing or cannot be moved.
+    fn move_package_database(&self, root: &Dir) -> Result<()>;
+
     /// Delete the repository indexes the package manager downloaded during
     /// the build. The database of installed packages is not removed.
     ///

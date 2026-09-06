@@ -68,6 +68,10 @@ mod tests {
             Ok(())
         }
 
+        fn move_package_database(&self, _root: &Dir) -> Result<()> {
+            Ok(())
+        }
+
         fn remove_repository_indexes(&self, _root: &Dir) -> Result<()> {
             Ok(())
         }
@@ -102,7 +106,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_a_missing_machine_id() -> Result<()> {
+    fn creates_missing_machine_id() -> Result<()> {
         let root = rootfs()?;
         root.create_dir("etc")?;
         remove_machine_identity(&root, &NoIdentity)?;
