@@ -18,6 +18,7 @@ use crate::distro;
 mod identity;
 mod initramfs;
 mod layout;
+mod lint;
 mod tmpfiles;
 mod var;
 
@@ -40,5 +41,6 @@ pub fn finalize(_opts: FinalizeOpts) -> Result<()> {
     var::write_var_tmpfiles(&root, &UsersCache::new())
         .context("generating /var tmpfiles.d entries")?;
     var::empty_var(&root).context("emptying /var")?;
-    Ok(())
+
+    lint::bootc_lint()
 }
