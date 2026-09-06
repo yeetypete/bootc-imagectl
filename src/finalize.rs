@@ -37,6 +37,9 @@ pub fn finalize(_opts: FinalizeOpts) -> Result<()> {
 
     identity::remove_machine_identity(&root, distro).context("removing machine identity")?;
     distro
+        .move_package_database(&root)
+        .context("moving the package database")?;
+    distro
         .remove_repository_indexes(&root)
         .context("removing repository indexes")?;
     layout::layout_toplevel(&root).context("laying out the toplevel")?;

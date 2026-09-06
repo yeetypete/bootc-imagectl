@@ -234,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn fails_on_an_owner_without_an_account() -> Result<()> {
+    fn fails_on_owner_without_account() -> Result<()> {
         let root = rootfs()?;
         root.create_dir_all("var/lib/x")?;
         let err = format!(
@@ -246,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_only_new_entries_to_a_new_file() -> Result<()> {
+    fn writes_only_new_entries_to_new_file() -> Result<()> {
         let root = rootfs()?;
         let db = accounts(&root)?;
         root.create_dir_all(tmpfiles::USR_TMPFILES_DIR)?;
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_var_tmp_on_an_empty_rootfs() -> Result<()> {
+    fn creates_var_tmp_on_empty_rootfs() -> Result<()> {
         let root = rootfs()?;
         write_var_tmpfiles(&root, &no_accounts())?;
         empty_var(&root)?;
