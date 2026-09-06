@@ -18,6 +18,16 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uzers = { version = "0.12", default-features = false, features = ["cache", "mock"] }
 
+[features]
+# Builds the end-to-end tests, which run inside a container, see `just test-e2e`.
+e2e = []
+
+# End-to-end tests, see tests/e2e/main.rs.
+[[test]]
+name = "e2e"
+path = "tests/e2e/main.rs"
+required-features = ["e2e"]
+
 [lints.clippy]
 dbg_macro = "warn"
 exit = "warn"

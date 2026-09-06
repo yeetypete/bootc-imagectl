@@ -1,0 +1,50 @@
+ARG ARCH_IMAGE=docker.io/archlinux/archlinux:base-20260906.0.587188@sha256:1eb3314f8f66ab90c8c755acaf9a5502c705b81104cb885ea69f1c74f3a6bb80
+
+
+FROM ${ARCH_IMAGE} AS bootc-builder
+
+ARG BOOTC_VERSION=v1.16.10
+
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -Syu --noconfirm --needed \
+    git \
+    go-md2man \
+    make \
+    ostree \
+    pkgconf \
+    rust
+
+WORKDIR /bootc
+
+RUN git clone --depth 1 --branch "${BOOTC_VERSION}" https://github.com/bootc-dev/bootc.git .
+
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/bootc/target,sharing=locked \
+    make bin install DESTDIR=/out
+
+
+FROM ${ARCH_IMAGE}
+
+# Mask dracut's alpm hooks with empty files to prevent them from building an initramfs into
+# /boot when the kernel is installed. finalize builds it next to the kernel.
+RUN mkdir -p /etc/pacman.d/hooks && \
+    touch /etc/pacman.d/hooks/60-dracut-remove.hook /etc/pacman.d/hooks/90-dracut-install.hook
+
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -Syu --noconfirm --needed \
+    base \
+    dracut \
+    linux \
+    openssh \
+    ostree \
+    zstd
+
+COPY --from=bootc-builder /out/usr/ /usr/
+
+# Bootc links against the installed libostree.
+RUN ldconfig
+
+COPY prepare-root.conf /usr/lib/ostree/prepare-root.conf
+
+LABEL containers.bootc=1
+CMD ["/sbin/init"]
