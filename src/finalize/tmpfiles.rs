@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -31,7 +31,7 @@ const PATH_SPECIFIERS: &[(&str, &str)] = &[
 ];
 
 /// Escape a path for a tmpfiles.d line.
-pub(super) fn escape_path(path: &str) -> String {
+fn escape_path(path: &str) -> String {
     let mut escaped = String::with_capacity(path.len());
     for c in path.chars() {
         match c {
@@ -43,6 +43,47 @@ pub(super) fn escape_path(path: &str) -> String {
         }
     }
     escaped
+}
+
+/// This type is modeled after a tmpfiles.d(5) line: type, path, mode, user,
+/// group, age and argument, separated by whitespace, with `-` for a field
+/// that does not apply. Only the two types bootc's own generator writes are
+/// modeled.
+pub(super) enum Entry<'a> {
+    /// A `d` line. systemd creates the directory with this mode and owner.
+    Directory {
+        path: &'a str,
+        mode: u32,
+        user: &'a str,
+        group: &'a str,
+    },
+    /// An `L` line. systemd creates the symlink, with the target in the
+    /// argument field. Mode and owner are ignored for symlinks.
+    Symlink { path: &'a str, target: &'a str },
+}
+
+impl Entry<'_> {
+    /// The path as written in tmpfiles.d, escaped.
+    pub(super) fn path(&self) -> String {
+        match self {
+            Self::Directory { path, .. } | Self::Symlink { path, .. } => escape_path(path),
+        }
+    }
+}
+
+impl fmt::Display for Entry<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Directory {
+                mode, user, group, ..
+            } => {
+                write!(f, "d {} {mode:04o} {user} {group} -", self.path())
+            }
+            Self::Symlink { target, .. } => {
+                write!(f, "L {} - - - - {}", self.path(), escape_path(target))
+            }
+        }
+    }
 }
 
 /// The path field of a tmpfiles.d line, or `None` for a comment or blank line.
@@ -99,7 +140,7 @@ pub(super) fn patch_tmpfiles(root: &Dir) -> Result<()> {
 
     // provision.conf writes the credential-provisioned root ssh key to /root,
     // now a symlink to /var/roothome. Point it there directly. Drop its
-    // /var/roothome line, since the image declares that directory itself and
+    // /var/roothome line, since the layout step declares that directory and
     // systemd warns about duplicates at boot.
     let provision = format!("{USR_TMPFILES_DIR}/provision.conf");
     if let Some(content) = root
@@ -232,6 +273,22 @@ mod tests {
         assert_eq!(entry_path("# d /commented 0755 - - -"), None);
         assert_eq!(entry_path(""), None);
         assert_eq!(entry_path("d"), None);
+    }
+
+    #[test]
+    fn displays_entries() {
+        let dir = Entry::Directory {
+            path: "/var/lib/with space",
+            mode: 0o700,
+            user: "foo",
+            group: "bar",
+        };
+        assert_eq!(dir.to_string(), "d /var/lib/with\\x20space 0700 foo bar -");
+        let link = Entry::Symlink {
+            path: "/var/lock",
+            target: "../run/lock",
+        };
+        assert_eq!(link.to_string(), "L /var/lock - - - - ../run/lock");
     }
 
     #[test]
