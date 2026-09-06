@@ -16,6 +16,7 @@ use crate::cli::FinalizeOpts;
 use crate::distro;
 
 mod identity;
+mod initramfs;
 mod layout;
 mod tmpfiles;
 mod var;
@@ -30,6 +31,9 @@ pub fn finalize(_opts: FinalizeOpts) -> Result<()> {
     let root = Dir::open_ambient_dir("/", ambient_authority()).context("opening /")?;
     let distro = distro::detect(&root).context("detecting the distribution")?;
     info!("finalizing a {} rootfs", distro.name());
+
+    initramfs::build_initramfs(&root).context("building the initramfs")?;
+
     identity::remove_machine_identity(&root, distro).context("removing machine identity")?;
     layout::layout_toplevel(&root).context("laying out the toplevel")?;
     tmpfiles::patch_tmpfiles(&root).context("patching tmpfiles.d")?;
