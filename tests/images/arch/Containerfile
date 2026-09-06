@@ -44,7 +44,9 @@ COPY --from=bootc-builder /out/usr/ /usr/
 # Bootc links against the installed libostree.
 RUN ldconfig
 
-COPY prepare-root.conf /usr/lib/ostree/prepare-root.conf
+COPY system_files/ /
+
+RUN systemctl enable systemd-networkd.service sshd.service remote-fs.target
 
 LABEL containers.bootc=1
 CMD ["/sbin/init"]

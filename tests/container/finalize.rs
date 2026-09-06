@@ -17,7 +17,7 @@ const BOOTC_IMAGECTL: &str = "/usr/libexec/bootc-imagectl";
 pub(crate) static ROOT: LazyLock<Dir> = LazyLock::new(|| {
     assert!(
         Path::new("/run/.containerenv").exists() || Path::new("/.dockerenv").exists(),
-        "refusing to finalize the host, run the e2e tests with `just test-e2e`"
+        "refusing to finalize the host, run the container tests with `just test-container`"
     );
     Command::new(BOOTC_IMAGECTL)
         .arg("finalize")

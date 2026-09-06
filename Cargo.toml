@@ -19,14 +19,23 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uzers = { version = "0.12", default-features = false, features = ["cache", "mock"] }
 
 [features]
-# Builds the end-to-end tests, which run inside a container, see `just test-e2e`.
-e2e = []
+# Builds the container tests, which finalize the images in tests/images and
+# check the result, see `just test-container`.
+container = []
+# Builds the VM tests, which boot the images, see `just test-vm`.
+vm = []
 
-# End-to-end tests, see tests/e2e/main.rs.
+# The container tests, see tests/container/main.rs.
 [[test]]
-name = "e2e"
-path = "tests/e2e/main.rs"
-required-features = ["e2e"]
+name = "container"
+path = "tests/container/main.rs"
+required-features = ["container"]
+
+# The VM tests, see tests/vm/main.rs.
+[[test]]
+name = "vm"
+path = "tests/vm/main.rs"
+required-features = ["vm"]
 
 [lints.clippy]
 dbg_macro = "warn"
