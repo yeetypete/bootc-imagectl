@@ -8,7 +8,8 @@ use xshell::{Shell, cmd};
 
 use crate::{bound_binary, target_dir};
 
-/// Where the VM sees the target directory, as bcvk names its binds.
+/// Where the VM sees the target directory. bcvk mounts a bind named `target`
+/// there.
 const TARGET: &str = "/run/virtiofs-mnt-target";
 
 /// Boot the image in a VM with the target directory bound in and run the
