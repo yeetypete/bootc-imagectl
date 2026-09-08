@@ -17,9 +17,10 @@ const TARGET: &str = "/usr/libexec/bootc-imagectl-test";
 pub(crate) fn run(sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> Result<()> {
     let volume = format!("{}:{TARGET}:ro", target_dir(binary)?.display());
     let test = bound_binary(binary, TARGET)?;
+    // libtest colorizes only when it knows the terminal type.
     cmd!(
         sh,
-        "podman run --rm --network=none --volume {volume} {image} {test} {args...}"
+        "podman run --rm --network=none --env TERM --volume {volume} {image} {test} {args...}"
     )
     .run()?;
     Ok(())

@@ -128,9 +128,12 @@ fn run(sh: &Shell, suite: Suite, binary: &Path, args: &[OsString]) -> Result<()>
             args.push("--skip".into());
             args.push(format!("{other}::").into());
         }
-        if std::io::stdout().is_terminal() {
-            args.push("--color=always".into());
-        }
+        let color = if std::io::stdout().is_terminal() {
+            "always"
+        } else {
+            "never"
+        };
+        args.push(format!("--color={color}").into());
         run(sh, &image, binary, &args)?;
     }
     Ok(())
