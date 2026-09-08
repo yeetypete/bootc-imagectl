@@ -10,8 +10,8 @@ use bootc_imagectl::command::CommandRunExt;
 use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs::{Dir, MetadataExt};
 
-/// Where run.sh mounts bootc-imagectl.
-const BOOTC_IMAGECTL: &str = "/usr/libexec/bootc-imagectl";
+/// Where xtask binds bootc-imagectl.
+const BOOTC_IMAGECTL: &str = "/usr/libexec/bootc-imagectl-test/bootc-imagectl";
 
 /// The rootfs after `bootc-imagectl finalize` ran on it once.
 pub(crate) static ROOT: LazyLock<Dir> = LazyLock::new(|| {

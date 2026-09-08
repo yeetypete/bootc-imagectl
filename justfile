@@ -6,8 +6,8 @@ default:
 
 # Check formatting and lint.
 check:
-    cargo fmt --check
-    cargo clippy --all-targets --all-features --locked
+    cargo fmt --all --check
+    cargo clippy --workspace --all-targets --all-features --locked
 
 # Run the tests.
 test:
@@ -15,13 +15,11 @@ test:
 
 # Run the container tests.
 test-container *args:
-    CARGO_TARGET_{{ uppercase(arch()) }}_UNKNOWN_LINUX_GNU_RUNNER=tests/container/run.sh \
-        cargo test --locked --features container --test container -- {{ args }}
+    cargo xtask test container {{ args }}
 
 # Run the VM tests.
 test-vm *args:
-    CARGO_TARGET_{{ uppercase(arch()) }}_UNKNOWN_LINUX_GNU_RUNNER=tests/vm/run.sh \
-        cargo test --locked --features vm --test vm -- {{ args }}
+    cargo xtask test vm {{ args }}
 
 # Build a release binary.
 build:
