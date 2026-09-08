@@ -1,30 +1,16 @@
-//! Finalize the rootfs and check the result.
+//! Check what `bootc-imagectl finalize` wrote into the image.
 
 use std::ffi::OsString;
 use std::path::Path;
-use std::process::Command;
 use std::sync::LazyLock;
 
 use anyhow::Result;
-use bootc_imagectl::command::CommandRunExt;
 use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs::{Dir, MetadataExt};
 
-/// Where run.sh mounts bootc-imagectl.
-const BOOTC_IMAGECTL: &str = "/usr/libexec/bootc-imagectl";
-
-/// The rootfs after `bootc-imagectl finalize` ran on it once.
-pub(crate) static ROOT: LazyLock<Dir> = LazyLock::new(|| {
-    assert!(
-        Path::new("/run/.containerenv").exists() || Path::new("/.dockerenv").exists(),
-        "refusing to finalize the host, run the container tests with `just test-container`"
-    );
-    Command::new(BOOTC_IMAGECTL)
-        .arg("finalize")
-        .run()
-        .expect("finalize failed");
-    Dir::open_ambient_dir("/", ambient_authority()).expect("opening /")
-});
+/// The root of the finalized image.
+pub(crate) static ROOT: LazyLock<Dir> =
+    LazyLock::new(|| Dir::open_ambient_dir("/", ambient_authority()).expect("opening /"));
 
 /// The sorted names in `dir`.
 pub(crate) fn names(dir: &str) -> Result<Vec<OsString>> {

@@ -1,7 +1,4 @@
-//! Run bootc-imagectl inside a container and check the result. The tests
-//! run in a container of each image built from tests/images. run.sh starts
-//! those containers (see the justfile). A module named after an image
-//! contains the tests specific to that image.
+//! Run tests inside a container of the finalized image.
 
 mod arch;
 mod finalize;
