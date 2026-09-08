@@ -44,7 +44,7 @@ enum Task {
 enum Suite {
     /// The tests in tests/container, run in a container of each image.
     Container,
-    /// The tests in tests/vm, run in a VM booted from each finalized image.
+    /// The tests in tests/vm, run in a VM booted from each image.
     Vm,
 }
 
@@ -117,7 +117,12 @@ fn run(sh: &Shell, suite: Suite, binary: &Path, args: &[OsString]) -> Result<()>
     for name in &names {
         let image = format!("{REPOSITORY}:{name}");
         let dir = images.join(name);
-        cmd!(sh, "podman build --tag {image} {dir}").run()?;
+        let target = target_dir(binary)?;
+        cmd!(
+            sh,
+            "podman build --build-context bootc-imagectl={target} --tag {image} {dir}"
+        )
+        .run()?;
         let mut args = args.to_vec();
         for other in names.iter().filter(|other| *other != name) {
             args.push("--skip".into());

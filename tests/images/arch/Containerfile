@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
     make bin install DESTDIR=/out
 
 
-FROM ${ARCH_IMAGE}
+FROM ${ARCH_IMAGE} AS image
 
 # Mask dracut's alpm hooks with empty files to prevent them from building an initramfs into
 # /boot when the kernel is installed. finalize builds it next to the kernel.
@@ -50,3 +50,10 @@ RUN systemctl enable systemd-networkd.service sshd.service remote-fs.target
 
 LABEL containers.bootc=1
 CMD ["/sbin/init"]
+
+
+FROM image AS finalized
+
+# The xtask passes the directory holding bootc-imagectl as a build context.
+COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
+RUN /usr/libexec/bootc-imagectl finalize

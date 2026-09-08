@@ -1,4 +1,4 @@
-//! Run bootc-imagectl inside a container and check the result.
+//! Run tests inside a container of the finalized image.
 
 mod arch;
 mod finalize;
