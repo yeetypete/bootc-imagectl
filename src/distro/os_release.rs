@@ -69,6 +69,8 @@ fn unquote(value: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use super::*;
     use crate::testutil::rootfs;
 
@@ -117,14 +119,14 @@ mod tests {
 
     #[test]
     fn parses_os_release_contents() -> Result<()> {
-        let release = parse(
-            "# comment\n\
-             NAME=\"Ubuntu\"\n\
-             ID=ubuntu\n\
-             ID_LIKE='debian'\n\
-             \n\
-             MALFORMED LINE\n",
-        )?;
+        let release = parse(indoc! {r#"
+            # comment
+            NAME="Ubuntu"
+            ID=ubuntu
+            ID_LIKE='debian'
+
+            MALFORMED LINE
+        "#})?;
         assert_eq!(
             release,
             OsRelease {
@@ -137,7 +139,10 @@ mod tests {
 
     #[test]
     fn splits_id_like_on_whitespace() -> Result<()> {
-        let release = parse("ID=almalinux\nID_LIKE=\"rhel centos fedora\"\n")?;
+        let release = parse(indoc! {r#"
+            ID=almalinux
+            ID_LIKE="rhel centos fedora"
+        "#})?;
         assert_eq!(release.id_like, ["rhel", "centos", "fedora"]);
         Ok(())
     }
@@ -150,7 +155,10 @@ mod tests {
 
     #[test]
     fn lineage_starts_with_id_then_follows_id_like() -> Result<()> {
-        let release = parse("ID=linuxmint\nID_LIKE=\"ubuntu debian\"\n")?;
+        let release = parse(indoc! {r#"
+            ID=linuxmint
+            ID_LIKE="ubuntu debian"
+        "#})?;
         let lineage: Vec<&str> = release.lineage().collect();
         assert_eq!(lineage, ["linuxmint", "ubuntu", "debian"]);
 

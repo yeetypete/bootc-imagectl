@@ -64,6 +64,8 @@ pub fn detect(root: &Dir) -> Result<&'static dyn Distro> {
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use super::*;
     use crate::testutil::rootfs;
 
@@ -76,16 +78,25 @@ mod tests {
 
     #[test]
     fn detects_arch() -> Result<()> {
-        let root = with_os_release("ID=arch\nBUILD_ID=rolling\n")?;
+        let root = with_os_release(indoc! {"
+            ID=arch
+            BUILD_ID=rolling
+        "})?;
         assert_eq!(detect(&root)?.name(), "arch");
         Ok(())
     }
 
     #[test]
     fn maps_derivatives_to_their_family() -> Result<()> {
-        let root = with_os_release("ID=manjaro\nID_LIKE=\"manjaro arch\"\n")?;
+        let root = with_os_release(indoc! {r#"
+            ID=manjaro
+            ID_LIKE="manjaro arch"
+        "#})?;
         assert_eq!(detect(&root)?.name(), "arch");
-        let root = with_os_release("ID=endeavouros\nID_LIKE=arch\n")?;
+        let root = with_os_release(indoc! {"
+            ID=endeavouros
+            ID_LIKE=arch
+        "})?;
         assert_eq!(detect(&root)?.name(), "arch");
         Ok(())
     }

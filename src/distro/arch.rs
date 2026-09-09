@@ -95,6 +95,8 @@ impl Distro for Arch {
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use super::*;
     use crate::testutil::rootfs;
 
@@ -104,7 +106,11 @@ mod tests {
         root.create_dir("etc")?;
         root.write(
             "etc/pacman.conf",
-            "[options]\n# DBPath = /commented/out\nDBPath      = /usr/lib/sysimage/pacman/\n",
+            indoc! {"
+                [options]
+                # DBPath = /commented/out
+                DBPath      = /usr/lib/sysimage/pacman/
+            "},
         )?;
         assert_eq!(db_path(&root)?, "usr/lib/sysimage/pacman");
         Ok(())
@@ -123,14 +129,21 @@ mod tests {
         root.create_dir("etc")?;
         root.write(
             "etc/pacman.conf",
-            "[options]\n#DBPath      = /var/lib/pacman/\nHoldPkg     = pacman glibc\n",
+            indoc! {"
+                [options]
+                #DBPath      = /var/lib/pacman/
+                HoldPkg     = pacman glibc
+            "},
         )?;
         root.create_dir_all("var/lib/pacman/local/pacman-7.1.0-2")?;
         root.create_dir_all("var/lib/pacman/sync")?;
         root.write("var/lib/pacman/local/ALPM_DB_VERSION", b"9")?;
         root.write(
             "var/lib/pacman/local/pacman-7.1.0-2/desc",
-            b"%NAME%\npacman\n",
+            indoc! {b"
+                %NAME%
+                pacman
+            "},
         )?;
         root.write("var/lib/pacman/sync/core.db", b"index")?;
 
@@ -142,7 +155,11 @@ mod tests {
         assert!(root.exists("usr/lib/sysimage/pacman/sync/core.db"));
         assert_eq!(
             root.read_to_string("etc/pacman.conf")?,
-            "[options]\nDBPath = /usr/lib/sysimage/pacman/\nHoldPkg     = pacman glibc\n"
+            indoc! {"
+                [options]
+                DBPath = /usr/lib/sysimage/pacman/
+                HoldPkg     = pacman glibc
+            "}
         );
         assert_eq!(db_path(&root)?, USR_DB_PATH);
         Ok(())
@@ -152,7 +169,10 @@ mod tests {
     fn keeps_database_already_outside_var() -> Result<()> {
         let root = rootfs()?;
         root.create_dir("etc")?;
-        let conf = "[options]\nDBPath = /usr/lib/pacman/\n";
+        let conf = indoc! {"
+            [options]
+            DBPath = /usr/lib/pacman/
+        "};
         root.write("etc/pacman.conf", conf)?;
         root.create_dir_all("usr/lib/pacman/local")?;
 
@@ -169,7 +189,10 @@ mod tests {
         root.create_dir("etc")?;
         root.write(
             "etc/pacman.conf",
-            "[options]\n#DBPath      = /var/lib/pacman/\n",
+            indoc! {"
+                [options]
+                #DBPath      = /var/lib/pacman/
+            "},
         )?;
         let err = format!("{:#}", Arch.move_package_database(&root).unwrap_err());
         assert!(err.contains("moving /var/lib/pacman"), "{err}");
@@ -186,7 +209,10 @@ mod tests {
         root.write("var/lib/pacman/local/ALPM_DB_VERSION", b"9")?;
         root.write(
             "var/lib/pacman/local/pacman-7.0.0-1/desc",
-            b"%NAME%\npacman\n",
+            indoc! {b"
+                %NAME%
+                pacman
+            "},
         )?;
 
         Arch.remove_repository_indexes(&root)?;

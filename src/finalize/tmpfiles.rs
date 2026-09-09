@@ -161,6 +161,8 @@ pub(super) fn patch_tmpfiles(root: &Dir) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use super::*;
     use crate::testutil::rootfs;
 
@@ -185,19 +187,23 @@ mod tests {
         root.create_dir_all(USR_TMPFILES_DIR)?;
         root.write(
             format!("{USR_TMPFILES_DIR}/provision.conf"),
-            "# Provision SSH key for root\n\
-             d- /root/.ssh :0700 root :root -\n\
-             f^ /root/.ssh/authorized_keys :0600 root :root - ssh.authorized_keys.root\n\
-             d- /var/roothome :0700 root :root -\n",
+            indoc! {"
+                # Provision SSH key for root
+                d- /root/.ssh :0700 root :root -
+                f^ /root/.ssh/authorized_keys :0600 root :root - ssh.authorized_keys.root
+                d- /var/roothome :0700 root :root -
+            "},
         )?;
 
         patch_tmpfiles(&root)?;
 
         assert_eq!(
             root.read_to_string(format!("{USR_TMPFILES_DIR}/provision.conf"))?,
-            "# Provision SSH key for root\n\
-             d- /var/roothome/.ssh :0700 root :root -\n\
-             f^ /var/roothome/.ssh/authorized_keys :0600 root :root - ssh.authorized_keys.root\n"
+            indoc! {"
+                # Provision SSH key for root
+                d- /var/roothome/.ssh :0700 root :root -
+                f^ /var/roothome/.ssh/authorized_keys :0600 root :root - ssh.authorized_keys.root
+            "}
         );
         Ok(())
     }
@@ -208,7 +214,10 @@ mod tests {
         root.create_dir_all(USR_TMPFILES_DIR)?;
         root.write(
             format!("{USR_TMPFILES_DIR}/provision.conf"),
-            "d- /root/.ssh :0700 root :root -\nd- /var/roothome :0700 root :root -\n",
+            indoc! {"
+                d- /root/.ssh :0700 root :root -
+                d- /var/roothome :0700 root :root -
+            "},
         )?;
 
         patch_tmpfiles(&root)?;
@@ -235,7 +244,13 @@ mod tests {
         root.create_dir_all(ETC_TMPFILES_DIR)?;
         root.write(
             format!("{USR_TMPFILES_DIR}/var.conf"),
-            "# comment\n\nd /var/log 0755 - - -\nd %S/containers 0755 root root -\nL /var/lock - - - - ../run/lock\n",
+            indoc! {"
+                # comment
+
+                d /var/log 0755 - - -
+                d %S/containers 0755 root root -
+                L /var/lock - - - - ../run/lock
+            "},
         )?;
         root.write(
             format!("{ETC_TMPFILES_DIR}/local.conf"),
