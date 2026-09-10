@@ -11,7 +11,9 @@ use crate::finalize::{ROOT, names};
 fn moves_pacman_database_and_removes_its_indexes() -> Result<()> {
     let pacman_conf = ROOT.read_to_string("etc/pacman.conf")?;
     assert!(
-        pacman_conf.contains("\nDBPath = /usr/lib/sysimage/pacman/\n"),
+        pacman_conf
+            .lines()
+            .any(|line| line == "DBPath = /usr/lib/sysimage/pacman/"),
         "{pacman_conf}"
     );
     assert!(ROOT.exists("usr/lib/sysimage/pacman/local/ALPM_DB_VERSION"));
