@@ -1,5 +1,5 @@
 //! Build the initramfs next to the kernel under /usr/lib/modules.
-//! This is where bootc expects the kernel andgit  initramfs.
+//! This is where bootc expects the kernel and initramfs.
 
 use std::process::Command;
 
