@@ -7,12 +7,14 @@
 //! 1000.user -> alice.user                    for lookups by UID
 //! alice.user-privileged                      the password hash, mode 0600
 //! 1000.user-privileged -> alice.user-privileged
+//! alice:wheel.membership                     membership in a group
 //! ```
 //!
 //! The record holds the passwd(5) fields. The privileged file holds the
 //! password hash from shadow(5), which nss-systemd merges into the record
 //! when it may read the file. A user without a hash has no privileged file
-//! and is locked.
+//! and is locked. A membership file exists for every group the user belongs
+//! to.
 
 use std::ops::Not;
 
@@ -24,6 +26,7 @@ use serde::Serialize;
 
 use crate::login_defs::LoginDefs;
 use crate::passwd::{Passwd, Shadow, non_empty};
+use crate::sysusers::Name;
 
 /// The drop-in directory under /usr, where the image ships its user
 /// records, relative to the rootfs.
@@ -144,6 +147,17 @@ impl UserRecord {
         }
         Ok(())
     }
+}
+
+/// Write the membership file that makes `user` a member of `group`.
+///
+/// # Errors
+///
+/// Fails if the file cannot be written.
+pub fn write_membership(dir: &Dir, user: &Name, group: &Name) -> Result<()> {
+    let path = format!("{user}:{group}.membership");
+    dir.atomic_write_with_perms(&path, "{}\n", Permissions::from_mode(0o644))
+        .with_context(|| format!("writing {path}"))
 }
 
 /// Write `record` as JSON to `primary` with `mode`, and symlink `by_uid` to
@@ -279,6 +293,19 @@ mod tests {
         assert_eq!(root.read_link("1000.user")?, "alice.user");
         assert!(!root.exists("alice.user-privileged"));
         assert!(!root.exists("1000.user-privileged"));
+        Ok(())
+    }
+
+    #[test]
+    fn writes_membership_files() -> Result<()> {
+        let root = rootfs()?;
+        let name = |name: &str| name.parse::<Name>().expect("a valid name");
+        write_membership(&root, &name("alice"), &name("wheel"))?;
+        assert_eq!(root.read_to_string("alice:wheel.membership")?, "{}\n");
+        assert_eq!(
+            root.metadata("alice:wheel.membership")?.mode() & 0o777,
+            0o644
+        );
         Ok(())
     }
 }

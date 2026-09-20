@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
+use std::iter;
 use std::ops::ControlFlow;
 
 use anyhow::{Context, Result, bail};
@@ -17,7 +18,7 @@ use crate::distro::Distro;
 use crate::login_defs::LoginDefs;
 use crate::passwd::{self, Entry as _, Passwd, Shadow, is_intrinsic, non_empty};
 use crate::sysusers::lockfile::{Block, LockFile, Package};
-use crate::sysusers::{self, Entry, Id, Index, Membership, PrimaryGroup, User};
+use crate::sysusers::{self, Entry, Id, Index, Membership, Name, PrimaryGroup, User};
 use crate::userdb::{self, UserRecord};
 
 /// The directories whose paths must be owned by accounts in the image,
@@ -457,6 +458,48 @@ pub(super) fn write_user_records(root: &Dir) -> Result<()> {
     Ok(())
 }
 
+/// Write a membership file for every user with a record and each group it
+/// belongs to: its primary group, and every group in /etc/group that lists
+/// it.
+///
+/// # Errors
+///
+/// Fails if the files cannot be read or written, or a user's primary GID
+/// has no group.
+pub(super) fn write_memberships(root: &Dir) -> Result<()> {
+    let users = Passwd::read_all(root)?;
+    let groups = passwd::Group::read_all(root)?;
+    let dir = root.open_dir(userdb::DROPIN_DIR)?;
+    let mut written = 0;
+    for user in users.iter().filter(|user| !is_intrinsic(user.uid)) {
+        let primary = groups
+            .iter()
+            .find(|group| group.gid == user.gid)
+            .with_context(|| {
+                format!(
+                    "the primary GID {} of {} matches no group",
+                    user.gid, user.name
+                )
+            })?;
+        let auxiliary = groups
+            .iter()
+            .filter(|group| group.members.contains(&user.name));
+        let names: BTreeSet<&Name> = iter::once(primary)
+            .chain(auxiliary)
+            .map(|group| &group.name)
+            .collect();
+        for group in names {
+            userdb::write_membership(&dir, &user.name, group)?;
+            written += 1;
+        }
+    }
+    info!(
+        "wrote {written} membership files to /{}",
+        userdb::DROPIN_DIR
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use cap_std_ext::cap_tempfile::utf8::TempDir;
@@ -704,6 +747,24 @@ mod tests {
         );
         let tss = root.read_to_string("usr/lib/userdb/tss.user")?;
         assert!(tss.contains("\"locked\": true"), "{tss}");
+
+        root.write("etc/group", GROUPS)?;
+        write_memberships(&root)?;
+        let names = root.open_dir(userdb::DROPIN_DIR)?.filenames_sorted()?;
+        let memberships: Vec<_> = names
+            .iter()
+            .filter(|name| name.ends_with(".membership"))
+            .collect();
+        assert_eq!(
+            memberships,
+            [
+                "avahi:adm.membership",
+                "avahi:avahi.membership",
+                "http:http.membership",
+                "tss:adm.membership",
+                "tss:tss.membership",
+            ]
+        );
         assert!(
             root.read_to_string("usr/lib/userdb/http.user")?
                 .contains("\"disposition\": \"system\"")

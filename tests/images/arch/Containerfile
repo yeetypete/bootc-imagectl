@@ -44,8 +44,9 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     ostree \
     zstd
 
-# A regular user with a password, for the tests of the privileged user records.
-RUN echo 'archie:password' | chpasswd
+# A regular user with a password and a group, for the tests of the user
+# records.
+RUN echo 'archie:password' | chpasswd && usermod -aG wheel archie
 
 COPY --from=bootc-builder /out/usr/ /usr/
 
