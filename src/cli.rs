@@ -2,9 +2,8 @@
 //! a bootc image onto a disk. Only the bootc composefs backend is
 //! supported.
 
-use std::path::PathBuf;
-
 use anyhow::Result;
+use cap_std_ext::camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::{finalize, install};
@@ -24,8 +23,8 @@ impl Cli {
     /// Returns the subcommand's error.
     pub fn run(self) -> Result<()> {
         match self.command {
-            Command::Finalize(opts) => finalize::finalize(opts),
-            Command::Install(opts) => install::install(opts),
+            Command::Finalize(opts) => finalize::finalize(&opts),
+            Command::Install(opts) => install::install(&opts),
         }
     }
 }
@@ -48,7 +47,7 @@ pub struct FinalizeOpts {
     /// and prints the lines to add to the lock file. Commit this file next to
     /// your Containerfile.
     #[arg(long, value_name = "PATH")]
-    pub sysusers_lock: PathBuf,
+    pub sysusers_lock: Utf8PathBuf,
 }
 
 /// Options for `install`.

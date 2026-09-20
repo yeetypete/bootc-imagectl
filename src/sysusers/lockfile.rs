@@ -1,0 +1,360 @@
+//! Read and write the image's sysusers lock file.
+//!
+//! The lock file is a sysusers.d file that specifies every user and group
+//! the build creates with a fixed UID and GID. It is a sequence of blocks. A
+//! `# package: <name>` comment starts a block and names the package that
+//! created the accounts on the lines that follow. `# package: -` marks
+//! accounts no package created that are kept on purpose.
+//!
+//! ```text
+//! # package: avahi-daemon
+//! g avahi 900
+//! u avahi 900 "Avahi mDNS/DNS-SD daemon" / /usr/bin/nologin
+//! # package: systemd
+//! g systemd-journal 981
+//! u systemd-network 976 "systemd Network Management" / /usr/bin/nologin
+//! m daemon adm
+//! ```
+//!
+//! systemd-sysusers reads the lock file like any other sysusers.d file.
+
+use std::fmt;
+use std::io::Read;
+use std::str::FromStr;
+
+use anyhow::{Context, Result, bail, ensure};
+use cap_std_ext::camino::Utf8Path;
+use cap_std_ext::cap_std::fs_utf8::Dir;
+use cap_std_ext::dirext::CapStdExtDirExtUtf8;
+
+use super::word::WHITESPACE;
+use super::{Entry, Id, is_config_file_name, lines};
+
+/// The comment that starts a block, up to the package name.
+const PACKAGE_HEADER: &str = "package:";
+
+/// The sysusers.d directory the lock file must live in. This
+/// guarantees it is tracked in the image, unlike /etc.
+const LOCK_DIR: &str = "usr/lib/sysusers.d";
+
+/// The package a block attributes its accounts to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Package {
+    /// `# package: <name>`: the package that created the accounts.
+    Named(String),
+    /// `# package: -`: no package created the accounts, and they are kept
+    /// on purpose.
+    Unowned,
+    /// `# package:` with no name. `finalize` prints this for accounts it
+    /// cannot attribute, and the author fills the name in. A lock file
+    /// with such a block does not parse.
+    #[allow(dead_code, reason = "constructed once finalize prints missing lines")]
+    Unknown,
+}
+
+/// The accounts one package created.
+impl FromStr for Package {
+    type Err = anyhow::Error;
+
+    /// Parse the text after `# package:`.
+    fn from_str(package: &str) -> Result<Self> {
+        Ok(match package.trim_matches(WHITESPACE) {
+            "" => bail!(
+                "the '# {PACKAGE_HEADER}' header names no package. Name the package that created the accounts, or - if none did"
+            ),
+            "-" => Self::Unowned,
+            name => {
+                ensure!(
+                    !name.contains(WHITESPACE),
+                    "the package name {name:?} contains whitespace"
+                );
+                Self::Named(name.to_owned())
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block {
+    pub package: Package,
+    pub entries: Vec<Entry>,
+}
+
+/// A parsed sysusers lock file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LockFile {
+    pub blocks: Vec<Block>,
+}
+
+/// Parse an entry line. Every lock file entry must fix its ID.
+fn parse_entry(line: &str) -> Result<Entry> {
+    let entry: Entry = line.parse()?;
+    let (name, id) = match &entry {
+        Entry::User(user) => (&user.name, &user.uid),
+        Entry::Group(group) => (&group.name, &group.gid),
+        Entry::Membership(_) => return Ok(entry),
+        Entry::Range(_) => bail!("the lock file takes no r lines"),
+    };
+    ensure!(
+        matches!(id, Id::Fixed(_)),
+        "the lock file must give {name} a fixed UID or GID, got {id}"
+    );
+    Ok(entry)
+}
+
+/// Parse one non-empty line into `blocks`.
+fn parse_line(blocks: &mut Vec<Block>, line: &str) -> Result<()> {
+    if let Some(comment) = line.strip_prefix('#') {
+        if let Some(package) = comment
+            .trim_matches(WHITESPACE)
+            .strip_prefix(PACKAGE_HEADER)
+        {
+            blocks.push(Block {
+                package: package.parse()?,
+                entries: Vec::new(),
+            });
+        }
+        return Ok(());
+    }
+    let entry = parse_entry(line)?;
+    let Some(block) = blocks.last_mut() else {
+        bail!("entry before the first '# {PACKAGE_HEADER}' header");
+    };
+    block.entries.push(entry);
+    Ok(())
+}
+
+impl FromStr for LockFile {
+    type Err = anyhow::Error;
+
+    /// Parse a lock file. Fails on a malformed line, a `# package:` header
+    /// with no name, an entry before the first header, or an entry without
+    /// a fixed ID. The error names the line.
+    fn from_str(content: &str) -> Result<Self> {
+        let mut blocks = Vec::new();
+        for (number, line) in lines(content) {
+            parse_line(&mut blocks, line).with_context(|| format!("line {number}"))?;
+        }
+        Ok(Self { blocks })
+    }
+}
+
+impl LockFile {
+    /// Read the lock file at `path`, relative to the rootfs. `None` if it
+    /// does not exist yet, e.g. on a first image build.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the path is not a .conf file in /usr/lib/sysusers.d, or if
+    /// the file cannot be read or parsed. The error names the file.
+    pub fn read(root: &Dir, path: &Utf8Path) -> Result<Option<Self>> {
+        ensure!(
+            path.parent() == Some(Utf8Path::new(LOCK_DIR))
+                && path.file_name().is_some_and(is_config_file_name),
+            "the lock file must be a .conf file in /{LOCK_DIR}, got /{path}"
+        );
+        let Some(mut file) = root
+            .open_optional(path)
+            .with_context(|| format!("reading /{path}"))?
+        else {
+            return Ok(None);
+        };
+        let mut content = String::new();
+        file.read_to_string(&mut content)
+            .with_context(|| format!("reading /{path}"))?;
+        content
+            .parse()
+            .map(Some)
+            .with_context(|| format!("parsing /{path}"))
+    }
+
+    /// The entries of every block, in file order.
+    pub fn entries(&self) -> impl Iterator<Item = &Entry> {
+        self.blocks.iter().flat_map(|block| &block.entries)
+    }
+}
+
+impl fmt::Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.package {
+            Package::Named(name) => writeln!(f, "# {PACKAGE_HEADER} {name}")?,
+            Package::Unowned => writeln!(f, "# {PACKAGE_HEADER} -")?,
+            Package::Unknown => writeln!(f, "# {PACKAGE_HEADER}")?,
+        }
+        for entry in &self.entries {
+            writeln!(f, "{entry}")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for LockFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for block in &self.blocks {
+            write!(f, "{block}")?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use indoc::indoc;
+
+    use super::*;
+    use crate::sysusers::{Group, Membership};
+    use crate::testutil::rootfs;
+
+    const EXAMPLE: &str = indoc! {r#"
+        # package: avahi-daemon
+        g avahi 900
+        u avahi 900 "Avahi mDNS/DNS-SD daemon" / /usr/bin/nologin
+        # package: systemd
+        g systemd-journal 981
+        u systemd-network 976 "systemd Network Management" / /usr/bin/nologin
+        m daemon adm
+        # package: -
+        g utmp 5
+    "#};
+
+    const LOCK_PATH: &str = "usr/lib/sysusers.d/00-bootc-imagectl.conf";
+
+    fn lock_path() -> &'static Utf8Path {
+        Utf8Path::new(LOCK_PATH)
+    }
+
+    fn packages(lock: &LockFile) -> Vec<(&Package, usize)> {
+        lock.blocks
+            .iter()
+            .map(|block| (&block.package, block.entries.len()))
+            .collect()
+    }
+
+    #[test]
+    fn parses_blocks() -> Result<()> {
+        let lock: LockFile = EXAMPLE.parse()?;
+        assert_eq!(
+            packages(&lock),
+            [
+                (&Package::Named("avahi-daemon".into()), 2),
+                (&Package::Named("systemd".into()), 3),
+                (&Package::Unowned, 1),
+            ]
+        );
+        assert_eq!(
+            lock.blocks[1].entries[2],
+            Entry::Membership(Membership {
+                user: "daemon".parse()?,
+                group: "adm".parse()?,
+            })
+        );
+        assert_eq!(lock.entries().count(), 6);
+        Ok(())
+    }
+
+    #[test]
+    fn round_trips() -> Result<()> {
+        let lock: LockFile = EXAMPLE.parse()?;
+        assert_eq!(lock.to_string(), EXAMPLE);
+        assert_eq!(lock.to_string().parse::<LockFile>()?, lock);
+        assert_eq!("".parse::<LockFile>()?, LockFile::default());
+        assert_eq!(LockFile::default().to_string(), "");
+        Ok(())
+    }
+
+    #[test]
+    fn displays_unknown_package() -> Result<()> {
+        let block = Block {
+            package: Package::Unknown,
+            entries: vec![Entry::Group(Group {
+                name: "x".parse()?,
+                gid: Id::Fixed(1),
+            })],
+        };
+        assert_eq!(block.to_string(), "# package:\ng x 1\n");
+        let err = format!("{:#}", block.to_string().parse::<LockFile>().unwrap_err());
+        assert!(err.contains("line 1"), "{err}");
+        assert!(err.contains("names no package"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn ignores_other_comments_and_tolerates_loose_headers() -> Result<()> {
+        let lock: LockFile = indoc! {"
+            #Type Name ID
+            #package:x
+
+            g x 1
+            # a comment in the block
+            #  package:   y
+        "}
+        .parse()?;
+        assert_eq!(
+            packages(&lock),
+            [
+                (&Package::Named("x".into()), 1),
+                (&Package::Named("y".into()), 0),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_malformed_files_with_their_line() {
+        let cases = [
+            ("g x 1\n", 1, "before the first"),
+            ("# package: a b\ng x 1\n", 1, "contains whitespace"),
+            ("# package: x\ng x 1\nbogus\n", 3, "missing name field"),
+            ("# package: x\nu foo -\n", 2, "fixed UID or GID, got -"),
+            (
+                "# package: x\ng foo /usr/bin/x\n",
+                2,
+                "fixed UID or GID, got /usr/bin/x",
+            ),
+            ("# package: x\nr - 500-900\n", 2, "takes no r lines"),
+        ];
+        for (content, line, expected) in cases {
+            let err = format!("{:#}", content.parse::<LockFile>().unwrap_err());
+            assert!(
+                err.starts_with(&format!("line {line}: ")),
+                "{content:?}: {err}"
+            );
+            assert!(err.contains(expected), "{content:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn reads_lock_file_if_present() -> Result<()> {
+        let root = rootfs()?;
+        assert_eq!(LockFile::read(&root, lock_path())?, None);
+
+        root.create_dir_all("usr/lib/sysusers.d")?;
+        root.write(LOCK_PATH, "# package: x\ng x 1\n")?;
+        let lock = LockFile::read(&root, lock_path())?.expect("the lock file exists");
+        assert_eq!(
+            lock.blocks[0].entries,
+            [Entry::Group(Group {
+                name: "x".parse()?,
+                gid: Id::Fixed(1),
+            })]
+        );
+
+        root.write(LOCK_PATH, "g x 1\n")?;
+        let err = format!("{:#}", LockFile::read(&root, lock_path()).unwrap_err());
+        assert!(err.contains(LOCK_PATH), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_a_path_outside_usr_lib_sysusers_d() -> Result<()> {
+        let root = rootfs()?;
+        for path in ["etc/sysusers.d/lock.conf", "usr/lib/sysusers.d/lock"] {
+            let err = format!(
+                "{:#}",
+                LockFile::read(&root, Utf8Path::new(path)).unwrap_err()
+            );
+            assert!(err.contains("must be a .conf file in"), "{path}: {err}");
+        }
+        Ok(())
+    }
+}

@@ -9,6 +9,6 @@ use crate::cli::InstallOpts;
 /// # Errors
 ///
 /// Fails until the subcommand is implemented.
-pub fn install(_opts: InstallOpts) -> Result<()> {
+pub fn install(_opts: &InstallOpts) -> Result<()> {
     bail!("install is not yet implemented")
 }

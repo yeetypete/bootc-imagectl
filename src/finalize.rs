@@ -15,6 +15,7 @@ use uzers::UsersCache;
 use crate::cli::FinalizeOpts;
 use crate::distro;
 
+mod accounts;
 mod identity;
 mod initramfs;
 mod layout;
@@ -28,14 +29,15 @@ mod var;
 ///
 /// Fails if the rootfs cannot be opened or a step fails. The error names
 /// the step.
-pub fn finalize(_opts: FinalizeOpts) -> Result<()> {
+pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     let root = Dir::open_ambient_dir("/", ambient_authority()).context("opening /")?;
     let distro = distro::detect(&root).context("detecting the distribution")?;
     info!("finalizing a {} rootfs", distro.name());
 
+    accounts::read_sysusers(&root, &opts.sysusers_lock).context("reading sysusers.d")?;
     initramfs::build_initramfs(&root).context("building the initramfs")?;
-
     identity::remove_machine_identity(&root, distro).context("removing machine identity")?;
+
     distro
         .move_package_database(&root)
         .context("moving the package database")?;
