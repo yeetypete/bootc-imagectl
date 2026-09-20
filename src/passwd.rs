@@ -11,11 +11,15 @@
 //! ```
 
 use std::fmt;
+use std::io::Write as _;
+use std::os::unix::fs::fchown;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use cap_std_ext::camino::Utf8PathBuf;
+use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
+use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 
 use crate::sysusers::{Name, parse_id};
 
@@ -40,6 +44,28 @@ pub trait Entry: FromStr<Err = anyhow::Error> + fmt::Display + fmt::Debug {
             .map(|(line, number)| line.parse().with_context(|| format!("line {number}")))
             .collect::<Result<_>>()
             .with_context(|| format!("parsing /{}", Self::PATH))
+    }
+
+    /// Replace the file in the rootfs with the entries, keeping its owner
+    /// and mode.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be read or written.
+    fn write_all(root: &Dir, entries: &[Self]) -> Result<()> {
+        let meta = root
+            .metadata(Self::PATH)
+            .with_context(|| format!("reading /{}", Self::PATH))?;
+        root.atomic_replace_with(Self::PATH, |file| -> Result<()> {
+            for entry in entries {
+                writeln!(file, "{entry}")?;
+            }
+            let file = file.get_ref().as_file();
+            file.set_permissions(meta.permissions())?;
+            fchown(file, Some(meta.uid()), Some(meta.gid()))?;
+            Ok(())
+        })
+        .with_context(|| format!("writing /{}", Self::PATH))
     }
 }
 
@@ -508,6 +534,27 @@ mod tests {
         for (error, expected) in cases {
             assert!(error.contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn writes_a_file_and_keeps_its_mode() -> Result<()> {
+        use cap_std_ext::cap_std::fs::{Permissions, PermissionsExt};
+
+        let root = rootfs()?;
+        root.create_dir("etc")?;
+        root.write(
+            Shadow::PATH,
+            "root:!*:20702::::::\nalice:$6$salt$hash:20702::::::\n",
+        )?;
+        root.set_permissions(Shadow::PATH, Permissions::from_mode(0o600))?;
+        let kept: Vec<Shadow> = Shadow::read_all(&root)?
+            .into_iter()
+            .filter(|entry| entry.name.as_str() == "root")
+            .collect();
+        Shadow::write_all(&root, &kept)?;
+        assert_eq!(root.read_to_string(Shadow::PATH)?, "root:!*:20702::::::\n");
+        assert_eq!(root.metadata(Shadow::PATH)?.mode() & 0o777, 0o600);
+        Ok(())
     }
 
     #[test]

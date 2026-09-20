@@ -1,6 +1,6 @@
 //! Fix the UIDs and GIDs of the users and groups the build created with the
-//! sysusers lock file, and move the users and their group memberships from
-//! /etc into /usr/lib/userdb, where an upgrade replaces them.
+//! sysusers lock file, and move the users from /etc into /usr/lib/userdb,
+//! where an upgrade replaces them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
@@ -13,6 +13,9 @@ use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::{CapStdExtDirExt, WalkConfiguration};
 use tracing::{debug, info};
+use uzers::cache::UsersCache;
+use uzers::os::unix::GroupExt;
+use uzers::{Groups, Users};
 
 use crate::distro::Distro;
 use crate::login_defs::LoginDefs;
@@ -25,16 +28,51 @@ use crate::userdb::{self, UserRecord};
 /// relative to the rootfs.
 const OWNED_DIRS: [&str; 2] = ["usr", "etc"];
 
-/// What the account checks look at.
+/// Account lookups through NSS.
+trait Nss {
+    /// The UID of the user with the name.
+    fn uid_of(&self, name: &str) -> Option<u32>;
+    /// The name of the user with the UID.
+    fn name_of(&self, uid: u32) -> Option<String>;
+    /// The GID of the group with the name.
+    fn gid_of(&self, group: &str) -> Option<u32>;
+    /// Whether the user is in the group's member list.
+    fn is_member(&self, user: &str, group: &str) -> bool;
+}
+
+impl<T: Users + Groups> Nss for T {
+    fn uid_of(&self, name: &str) -> Option<u32> {
+        self.get_user_by_name(name).map(|user| user.uid())
+    }
+
+    fn name_of(&self, uid: u32) -> Option<String> {
+        self.get_user_by_uid(uid)
+            .map(|user| user.name().to_string_lossy().into_owned())
+    }
+
+    fn gid_of(&self, group: &str) -> Option<u32> {
+        self.get_group_by_name(group).map(|group| group.gid())
+    }
+
+    fn is_member(&self, user: &str, group: &str) -> bool {
+        self.get_group_by_name(group)
+            .is_some_and(|group| group.members().iter().any(|member| member == user))
+    }
+}
+
+/// The accounts of the image, what configures them, and how the system
+/// resolves them.
 struct Accounts<'a> {
     root: &'a Dir,
     distro: &'a dyn Distro,
+    nss: &'a dyn Nss,
     /// The lock file's path, relative to the rootfs.
     lock_path: &'a Utf8Path,
     /// The lock file, if it exists.
     lock: Option<&'a LockFile>,
     users: &'a [Passwd],
     groups: &'a [passwd::Group],
+    shadows: &'a [Shadow],
     index: Index<'a>,
 }
 
@@ -47,6 +85,37 @@ impl Accounts<'_> {
     /// The groups the lock file must cover.
     fn groups_to_lock(&self) -> impl Iterator<Item = &passwd::Group> {
         self.groups.iter().filter(|group| !is_intrinsic(group.gid))
+    }
+
+    /// Every `(user, group)` pair of the users with records, through their
+    /// primary group or a member list in /etc/group.
+    fn memberships(&self) -> Result<BTreeSet<(&Name, &Name)>> {
+        let mut memberships = BTreeSet::new();
+        for user in self.users_to_lock() {
+            let primary = self
+                .groups
+                .iter()
+                .find(|group| group.gid == user.gid)
+                .with_context(|| {
+                    format!(
+                        "the primary GID {} of {} matches no group",
+                        user.gid, user.name
+                    )
+                })?;
+            let auxiliary = self
+                .groups
+                .iter()
+                .filter(|group| group.members.contains(&user.name));
+            for group in iter::once(primary).chain(auxiliary) {
+                memberships.insert((&user.name, &group.name));
+            }
+        }
+        Ok(memberships)
+    }
+
+    /// The shadow entry of the user, if it has one.
+    fn shadow_of(&self, name: &Name) -> Option<&Shadow> {
+        self.shadows.iter().find(|shadow| shadow.name == *name)
     }
 
     /// Whether a user or group in /etc has the ID.
@@ -124,10 +193,20 @@ enum Check {
     Ownership,
     /// Every package the lock file names is installed.
     Stale,
+    /// Every moved user resolves through NSS by name and by UID, with its
+    /// memberships.
+    Resolution,
+    /// Every user, group and membership the sysusers.d files configure
+    /// exists, so systemd-sysusers changes nothing at boot.
+    Sysusers,
 }
 
 impl Check {
-    const ALL: [Self; 4] = [Self::Lock, Self::Drift, Self::Ownership, Self::Stale];
+    /// The checks on the accounts in /etc, before the users move.
+    const BEFORE_MOVE: [Self; 4] = [Self::Lock, Self::Drift, Self::Ownership, Self::Stale];
+
+    /// The checks that the moved users still resolve.
+    const AFTER_MOVE: [Self; 2] = [Self::Resolution, Self::Sysusers];
 
     /// Issues the check found, one finding per line. Empty if it passed.
     fn run(self, accounts: &Accounts<'_>) -> Result<Vec<String>> {
@@ -136,6 +215,8 @@ impl Check {
             Self::Drift => Ok(drifted_ids(accounts)),
             Self::Ownership => unresolved_owners(accounts),
             Self::Stale => stale_packages(accounts),
+            Self::Resolution => unresolved_users(accounts),
+            Self::Sysusers => Ok(unapplied_entries(accounts)),
         }
     }
 
@@ -157,6 +238,12 @@ impl Check {
             Self::Stale => format!(
                 "remove the package's block from /{lock}, or change its header to '# package: -' if its accounts are kept on purpose"
             ),
+            Self::Resolution => {
+                "install nss-systemd and list systemd in the passwd, group and shadow databases of /etc/nsswitch.conf".to_owned()
+            }
+            Self::Sysusers => {
+                "run systemd-sysusers in the build after installing the packages".to_owned()
+            }
         };
         Some(help)
     }
@@ -169,6 +256,8 @@ impl fmt::Display for Check {
             Self::Drift => "drift",
             Self::Ownership => "ownership",
             Self::Stale => "stale",
+            Self::Resolution => "resolution",
+            Self::Sysusers => "sysusers",
         })
     }
 }
@@ -351,7 +440,7 @@ fn unresolved_owners(accounts: &Accounts<'_>) -> Result<Vec<String>> {
     Ok(findings)
 }
 
-/// Stale check: The packages the lock file names that are not installed. The
+/// Stale check: the packages the lock file names that are not installed. The
 /// lock file recreates their accounts on every build, so a removed package's
 /// accounts would otherwise stay in the image.
 fn stale_packages(accounts: &Accounts<'_>) -> Result<Vec<String>> {
@@ -366,6 +455,62 @@ fn stale_packages(accounts: &Accounts<'_>) -> Result<Vec<String>> {
         }
     }
     Ok(findings)
+}
+
+/// Resolution check: the moved users and memberships NSS does not resolve
+/// as /etc had them.
+fn unresolved_users(accounts: &Accounts<'_>) -> Result<Vec<String>> {
+    let nss = accounts.nss;
+    let mut findings = Vec::new();
+    for user in accounts.users_to_lock() {
+        let (name, uid) = (user.name.as_str(), user.uid);
+        match nss.uid_of(name) {
+            Some(found) if found == uid => {}
+            Some(found) => findings.push(format!("user {name} resolves to UID {found}, not {uid}")),
+            None => findings.push(format!("user {name} does not resolve")),
+        }
+        match nss.name_of(uid) {
+            Some(found) if found == name => {}
+            Some(found) => findings.push(format!("UID {uid} resolves to {found}, not {name}")),
+            None => findings.push(format!("UID {uid} does not resolve")),
+        }
+    }
+    for (user, group) in accounts.memberships()? {
+        if !nss.is_member(user.as_str(), group.as_str()) {
+            findings.push(format!("{user} does not resolve as a member of {group}"));
+        }
+    }
+    Ok(findings)
+}
+
+/// Sysusers check: the entries systemd-sysusers would still apply at boot.
+/// It creates a user or group it cannot find through NSS, and adds an `m`
+/// line's user to the group's member list in /etc/group.
+fn unapplied_entries(accounts: &Accounts<'_>) -> Vec<String> {
+    let (nss, index) = (accounts.nss, &accounts.index);
+    let mut findings = Vec::new();
+    for name in index.users.keys() {
+        if nss.uid_of(name.as_str()).is_none() {
+            findings.push(format!("systemd-sysusers would create the user {name}"));
+        }
+    }
+    for name in index.groups.keys() {
+        if nss.gid_of(name.as_str()).is_none() {
+            findings.push(format!("systemd-sysusers would create the group {name}"));
+        }
+    }
+    for &(user, group) in &index.memberships {
+        let listed = accounts
+            .groups
+            .iter()
+            .any(|entry| entry.name == *group && entry.members.contains(user));
+        if !listed {
+            findings.push(format!(
+                "systemd-sysusers would add {user} to the group {group}"
+            ));
+        }
+    }
+    findings
 }
 
 /// Run `checks` and fail if any has findings. Every failed check is
@@ -396,57 +541,53 @@ fn run(checks: &[Check], accounts: &Accounts<'_>) -> Result<()> {
     Ok(())
 }
 
-/// Check the users and groups in /etc against the sysusers.d files and the
-/// lock file at `lock`, an absolute path in the image.
+/// Check the accounts, write their user records and membership files, and
+/// move the users out of /etc. `lock` is the lock file's absolute path in
+/// the image.
 ///
 /// # Errors
 ///
-/// Fails if a check fails, reporting every failed check, or if the files
-/// cannot be read.
-pub(super) fn check_accounts(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -> Result<()> {
+/// Fails if a check fails, reporting every failed check, or if a file
+/// cannot be read or written.
+pub(super) fn finalize(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -> Result<()> {
     let lock_path = lock.strip_prefix("/").unwrap_or(lock);
     let users = Passwd::read_all(root)?;
     let groups = passwd::Group::read_all(root)?;
+    let shadows = Shadow::read_all(root)?;
     let files = sysusers::read_all(root)?;
     let lock = LockFile::read(root, lock_path)?;
+    let defs = LoginDefs::read(root)?;
+    let nss = UsersCache::new();
     let accounts = Accounts {
         root,
         distro,
+        nss: &nss,
         lock_path,
         lock: lock.as_ref(),
         users: &users,
         groups: &groups,
+        shadows: &shadows,
         index: files.iter().collect(),
     };
-    run(&Check::ALL, &accounts)?;
-    info!("every user and group is in the sysusers lock file /{lock_path}");
-    Ok(())
+    run(&Check::BEFORE_MOVE, &accounts).context("checking the accounts")?;
+    write_user_records(&accounts, &defs).context("writing the user records")?;
+    write_memberships(&accounts).context("writing the membership files")?;
+    move_users(&accounts).context("moving the users out of /etc")?;
+    run(&Check::AFTER_MOVE, &accounts).context("checking that the moved users resolve")
 }
 
 /// Write a user record for every user in /etc/passwd other than root and
 /// nobody, which nss-systemd synthesizes itself, to the drop-in directory.
 /// A user with a password hash in /etc/shadow gets a privileged record with
 /// the hash, every other user is locked.
-///
-/// # Errors
-///
-/// Fails if the files cannot be read or written, or a UID is in no range of
-/// login.defs.
-pub(super) fn write_user_records(root: &Dir) -> Result<()> {
-    let defs = LoginDefs::read(root)?;
-    let users = Passwd::read_all(root)?;
-    let shadows = Shadow::read_all(root)?;
-    let shadow_of: BTreeMap<_, _> = shadows
-        .iter()
-        .map(|shadow| (&shadow.name, shadow))
-        .collect();
+fn write_user_records(accounts: &Accounts<'_>, defs: &LoginDefs) -> Result<()> {
+    let root = accounts.root;
     root.create_dir_all(userdb::DROPIN_DIR)
         .with_context(|| format!("creating /{}", userdb::DROPIN_DIR))?;
     let dir = root.open_dir(userdb::DROPIN_DIR)?;
     let mut written = 0;
-    for user in users.iter().filter(|user| !is_intrinsic(user.uid)) {
-        let shadow = shadow_of.get(&user.name).copied();
-        let record = UserRecord::from_passwd(user, shadow, &defs)
+    for user in accounts.users_to_lock() {
+        let record = UserRecord::from_passwd(user, accounts.shadow_of(&user.name), defs)
             .with_context(|| format!("the user {}", user.name))?;
         record
             .write(&dir)
@@ -459,44 +600,42 @@ pub(super) fn write_user_records(root: &Dir) -> Result<()> {
 }
 
 /// Write a membership file for every user with a record and each group it
-/// belongs to: its primary group, and every group in /etc/group that lists
-/// it.
-///
-/// # Errors
-///
-/// Fails if the files cannot be read or written, or a user's primary GID
-/// has no group.
-pub(super) fn write_memberships(root: &Dir) -> Result<()> {
-    let users = Passwd::read_all(root)?;
-    let groups = passwd::Group::read_all(root)?;
-    let dir = root.open_dir(userdb::DROPIN_DIR)?;
-    let mut written = 0;
-    for user in users.iter().filter(|user| !is_intrinsic(user.uid)) {
-        let primary = groups
-            .iter()
-            .find(|group| group.gid == user.gid)
-            .with_context(|| {
-                format!(
-                    "the primary GID {} of {} matches no group",
-                    user.gid, user.name
-                )
-            })?;
-        let auxiliary = groups
-            .iter()
-            .filter(|group| group.members.contains(&user.name));
-        let names: BTreeSet<&Name> = iter::once(primary)
-            .chain(auxiliary)
-            .map(|group| &group.name)
-            .collect();
-        for group in names {
-            userdb::write_membership(&dir, &user.name, group)?;
-            written += 1;
-        }
+/// belongs to.
+fn write_memberships(accounts: &Accounts<'_>) -> Result<()> {
+    let dir = accounts.root.open_dir(userdb::DROPIN_DIR)?;
+    let memberships = accounts.memberships()?;
+    for (user, group) in &memberships {
+        userdb::write_membership(&dir, user, group)?;
     }
     info!(
-        "wrote {written} membership files to /{}",
+        "wrote {} membership files to /{}",
+        memberships.len(),
         userdb::DROPIN_DIR
     );
+    Ok(())
+}
+
+/// Remove the users with records from /etc/passwd and /etc/shadow. Their
+/// names stay in the member lists of /etc/group, which systemd-sysusers
+/// maintains at boot.
+fn move_users(accounts: &Accounts<'_>) -> Result<()> {
+    let root = accounts.root;
+    let moved: BTreeSet<&Name> = accounts.users_to_lock().map(|user| &user.name).collect();
+    let users: Vec<Passwd> = accounts
+        .users
+        .iter()
+        .filter(|user| !moved.contains(&user.name))
+        .cloned()
+        .collect();
+    Passwd::write_all(root, &users)?;
+    let shadows: Vec<Shadow> = accounts
+        .shadows
+        .iter()
+        .filter(|shadow| !moved.contains(&shadow.name))
+        .cloned()
+        .collect();
+    Shadow::write_all(root, &shadows)?;
+    info!("moved {} users out of /etc", moved.len());
     Ok(())
 }
 
@@ -505,6 +644,9 @@ mod tests {
     use cap_std_ext::cap_tempfile::utf8::TempDir;
     use cap_std_ext::dirext::CapStdExtDirExtUtf8;
     use indoc::indoc;
+
+    use uzers::mock::MockUsers;
+    use uzers::{Group, User};
 
     use super::*;
     use crate::sysusers::ConfigFile;
@@ -527,14 +669,41 @@ mod tests {
         adm:x:4:tss,avahi,root
     "};
 
+    const SHADOW: &str = indoc! {"
+        root:!*:20702::::::
+        avahi:!*:20702:::::1:
+        http:$6$salt$hash:20702::::::
+    "};
+
+    /// NSS as it resolves the test /etc once the users have moved: every
+    /// user by name and UID, and every group with its members, the primary
+    /// ones included.
+    fn nss(users: &[Passwd], groups: &[passwd::Group]) -> MockUsers {
+        let mut nss = MockUsers::with_current_uid(0);
+        for user in users {
+            nss.add_user(User::new(user.uid, user.name.as_str(), user.gid));
+        }
+        for group in groups {
+            let mut mock = Group::new(group.gid, group.name.as_str());
+            let primary = users.iter().filter(|user| user.gid == group.gid);
+            for member in primary.map(|user| &user.name).chain(&group.members) {
+                mock = mock.add_member(member.as_str());
+            }
+            nss.add_group(mock);
+        }
+        nss
+    }
+
     /// An empty rootfs with /usr and /etc, the accounts of the test /etc,
     /// the lock file parsed from `lock`, and one more sysusers.d file with
     /// `entries`.
     struct Fixture {
         root: TempDir,
         distro: TestDistro,
+        nss: MockUsers,
         users: Vec<Passwd>,
         groups: Vec<passwd::Group>,
+        shadows: Vec<Shadow>,
         lock: Option<LockFile>,
         files: Vec<ConfigFile>,
     }
@@ -557,11 +726,16 @@ mod tests {
             for dir in OWNED_DIRS {
                 root.create_dir(dir)?;
             }
+            let users: Vec<Passwd> = USERS.lines().map(str::parse).collect::<Result<_>>()?;
+            let groups: Vec<passwd::Group> =
+                GROUPS.lines().map(str::parse).collect::<Result<_>>()?;
             Ok(Self {
                 root,
                 distro,
-                users: USERS.lines().map(str::parse).collect::<Result<_>>()?,
-                groups: GROUPS.lines().map(str::parse).collect::<Result<_>>()?,
+                nss: nss(&users, &groups),
+                users,
+                groups,
+                shadows: SHADOW.lines().map(str::parse).collect::<Result<_>>()?,
                 lock,
                 files,
             })
@@ -571,10 +745,12 @@ mod tests {
             Accounts {
                 root: &self.root,
                 distro: &self.distro,
+                nss: &self.nss,
                 lock_path: Utf8Path::new("usr/lib/sysusers.d/00-bootc-imagectl.conf"),
                 lock: self.lock.as_ref(),
                 users: &self.users,
                 groups: &self.groups,
+                shadows: &self.shadows,
                 index: self.files.iter().collect(),
             }
         }
@@ -702,7 +878,10 @@ mod tests {
             ..TestDistro::default()
         };
         let fixture = Fixture::new(distro, Some(LOCK), "")?;
-        let err = format!("{:#}", run(&Check::ALL, &fixture.accounts()).unwrap_err());
+        let err = format!(
+            "{:#}",
+            run(&Check::BEFORE_MOVE, &fixture.accounts()).unwrap_err()
+        );
         assert!(
             err.starts_with("1 account checks failed\n\nThe stale check failed:\n"),
             "{err}"
@@ -715,22 +894,91 @@ mod tests {
     #[test]
     fn passes_a_complete_lock_file() -> Result<()> {
         let fixture = Fixture::new(TestDistro::default(), Some(LOCK), "")?;
-        run(&Check::ALL, &fixture.accounts())
+        run(&Check::BEFORE_MOVE, &fixture.accounts())
     }
 
-    const SHADOW: &str = indoc! {"
-        root:!*:20702::::::
-        avahi:!*:20702:::::1:
-        http:$6$salt$hash:20702::::::
-    "};
+    #[test]
+    fn resolution_check_names_what_nss_lacks() -> Result<()> {
+        let mut fixture = Fixture::new(TestDistro::default(), Some(LOCK), "")?;
+        assert_eq!(
+            Check::Resolution.run(&fixture.accounts())?,
+            Vec::<String>::new()
+        );
+
+        // NSS without tss, with http at another UID and avahi missing from adm.
+        let users: Vec<Passwd> = [
+            "http:x:35:34::/srv/http:/usr/bin/nologin",
+            "avahi:x:900:900::/:",
+        ]
+        .into_iter()
+        .map(str::parse)
+        .collect::<Result<_>>()?;
+        let groups: Vec<passwd::Group> = ["adm:x:4:tss", "avahi:x:900:", "http:x:34:"]
+            .into_iter()
+            .map(str::parse)
+            .collect::<Result<_>>()?;
+        fixture.nss = nss(&users, &groups);
+        assert_eq!(
+            Check::Resolution.run(&fixture.accounts())?,
+            [
+                "user http resolves to UID 35, not 33",
+                "UID 33 does not resolve",
+                "user tss does not resolve",
+                "UID 971 does not resolve",
+                "avahi does not resolve as a member of adm",
+                "tss does not resolve as a member of tss",
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sysusers_check_names_the_entries_the_build_did_not_apply() -> Result<()> {
+        let fixture = Fixture::new(TestDistro::default(), Some(LOCK), "")?;
+        assert_eq!(
+            Check::Sysusers.run(&fixture.accounts())?,
+            Vec::<String>::new()
+        );
+
+        let fixture = Fixture::new(
+            TestDistro::default(),
+            Some(LOCK),
+            "u foo 500\ng bar 501\nm tss avahi\n",
+        )?;
+        assert_eq!(
+            Check::Sysusers.run(&fixture.accounts())?,
+            [
+                "systemd-sysusers would create the user foo",
+                "systemd-sysusers would create the group bar",
+                "systemd-sysusers would create the group foo",
+                "systemd-sysusers would add tss to the group avahi",
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn moves_users_out_of_etc() -> Result<()> {
+        let fixture = Fixture::new(TestDistro::default(), Some(LOCK), "")?;
+        let root = &fixture.root;
+        root.write("etc/passwd", USERS)?;
+        root.write("etc/shadow", SHADOW)?;
+        root.write("etc/group", GROUPS)?;
+        move_users(&fixture.accounts())?;
+        assert_eq!(
+            root.read_to_string("etc/passwd")?,
+            "root:x:0:0:root:/root:/bin/bash\nnobody:x:65534:65534::/:/usr/bin/nologin\n"
+        );
+        assert_eq!(root.read_to_string("etc/shadow")?, "root:!*:20702::::::\n");
+        assert_eq!(root.read_to_string("etc/group")?, GROUPS);
+        Ok(())
+    }
 
     #[test]
     fn writes_records_for_every_user_but_root_and_nobody() -> Result<()> {
-        let root = rootfs()?;
-        root.create_dir("etc")?;
-        root.write("etc/passwd", USERS)?;
-        root.write("etc/shadow", SHADOW)?;
-        write_user_records(&root)?;
+        let fixture = Fixture::new(TestDistro::default(), Some(LOCK), "")?;
+        let root = &fixture.root;
+        write_user_records(&fixture.accounts(), &LoginDefs::default())?;
         let names = root.open_dir(userdb::DROPIN_DIR)?.filenames_sorted()?;
         assert_eq!(
             names,
@@ -748,8 +996,7 @@ mod tests {
         let tss = root.read_to_string("usr/lib/userdb/tss.user")?;
         assert!(tss.contains("\"locked\": true"), "{tss}");
 
-        root.write("etc/group", GROUPS)?;
-        write_memberships(&root)?;
+        write_memberships(&fixture.accounts())?;
         let names = root.open_dir(userdb::DROPIN_DIR)?.filenames_sorted()?;
         let memberships: Vec<_> = names
             .iter()
