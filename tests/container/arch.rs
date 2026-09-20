@@ -55,3 +55,16 @@ fn locks_uids_of_packages_users() -> Result<()> {
     assert_eq!(uid("uuidd"), Some(970));
     Ok(())
 }
+
+#[test]
+fn writes_user_records_to_userdb() -> Result<()> {
+    let record = ROOT.read_to_string("usr/lib/userdb/avahi.user")?;
+    assert!(record.contains("\"disposition\": \"system\""), "{record}");
+    assert!(record.contains("\"uid\": 969"), "{record}");
+    assert_eq!(
+        ROOT.read_link("usr/lib/userdb/969.user")?,
+        std::path::Path::new("avahi.user")
+    );
+    assert!(!ROOT.exists("usr/lib/userdb/root.user"));
+    Ok(())
+}

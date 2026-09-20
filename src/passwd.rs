@@ -43,6 +43,23 @@ pub trait Entry: FromStr<Err = anyhow::Error> + fmt::Display + fmt::Debug {
     }
 }
 
+/// The UID and GID of root.
+pub(crate) const ROOT_ID: u32 = 0;
+
+/// The UID and GID of nobody, the kernel's overflow account.
+pub(crate) const NOBODY_ID: u32 = 65534;
+
+/// Whether the UID or GID is intrinsic, the category systemd assigns to
+/// root and nobody which are always fixed on every system.
+pub(crate) fn is_intrinsic(id: u32) -> bool {
+    matches!(id, ROOT_ID | NOBODY_ID)
+}
+
+/// A field that may be empty, as `None`.
+pub(crate) fn non_empty(field: &str) -> Option<String> {
+    (!field.is_empty()).then(|| field.to_owned())
+}
+
 /// Split a line into its `N` colon-separated fields.
 fn fields<const N: usize>(line: &str) -> Result<[&str; N]> {
     line.split(':')
