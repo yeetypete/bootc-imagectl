@@ -99,3 +99,15 @@ fn writes_privileged_records_for_users_with_a_password() -> Result<()> {
     assert!(!ROOT.exists("usr/lib/userdb/avahi.user-privileged"));
     Ok(())
 }
+
+#[test]
+fn writes_membership_files_for_primary_and_auxiliary_groups() -> Result<()> {
+    assert_eq!(
+        ROOT.read_to_string("usr/lib/userdb/archie:archie.membership")?,
+        "{}\n"
+    );
+    assert!(ROOT.exists("usr/lib/userdb/archie:wheel.membership"));
+    assert!(ROOT.exists("usr/lib/userdb/avahi:avahi.membership"));
+    assert!(!ROOT.exists("usr/lib/userdb/root:root.membership"));
+    Ok(())
+}
