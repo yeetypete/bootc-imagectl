@@ -4,6 +4,7 @@ pub mod distro;
 pub mod finalize;
 pub(crate) mod fs;
 pub mod install;
+pub mod passwd;
 pub mod sysusers;
 
 #[cfg(test)]
