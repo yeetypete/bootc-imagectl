@@ -14,21 +14,11 @@ use cap_std_ext::dirext::{CapStdExtDirExt, WalkConfiguration};
 use tracing::{debug, info};
 
 use crate::distro::Distro;
-use crate::passwd::{self, Entry as _, Passwd};
+use crate::login_defs::LoginDefs;
+use crate::passwd::{self, Entry as _, Passwd, is_intrinsic, non_empty};
 use crate::sysusers::lockfile::{Block, LockFile, Package};
 use crate::sysusers::{self, Entry, Id, Index, Membership, PrimaryGroup, User};
-
-/// The UID and GID of root.
-const ROOT_ID: u32 = 0;
-
-/// The UID and GID of nobody, the kernel's overflow account.
-const NOBODY_ID: u32 = 65534;
-
-/// Whether the UID or GID is intrinsic, the category systemd assigns to
-/// root and nobody which are always fixed on every system.
-fn is_intrinsic(id: u32) -> bool {
-    matches!(id, ROOT_ID | NOBODY_ID)
-}
+use crate::userdb::{self, UserRecord};
 
 /// The directories whose paths must be owned by accounts in the image,
 /// relative to the rootfs.
@@ -180,10 +170,6 @@ impl fmt::Display for Check {
             Self::Stale => "stale",
         })
     }
-}
-
-fn non_empty(field: &str) -> Option<String> {
-    (!field.is_empty()).then(|| field.to_owned())
 }
 
 /// The lines for the accounts and memberships no entry fixes.
@@ -436,9 +422,37 @@ pub(super) fn check_accounts(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -
     Ok(())
 }
 
+/// Write a user record for every user in /etc/passwd other than root and
+/// nobody, which nss-systemd synthesizes itself, to the drop-in directory.
+///
+/// # Errors
+///
+/// Fails if the files cannot be read or written, or a UID is in no range of
+/// login.defs.
+pub(super) fn write_user_records(root: &Dir) -> Result<()> {
+    let defs = LoginDefs::read(root)?;
+    let users = Passwd::read_all(root)?;
+    root.create_dir_all(userdb::DROPIN_DIR)
+        .with_context(|| format!("creating /{}", userdb::DROPIN_DIR))?;
+    let dir = root.open_dir(userdb::DROPIN_DIR)?;
+    let mut written = 0;
+    for user in users.iter().filter(|user| !is_intrinsic(user.uid)) {
+        let record = UserRecord::from_passwd(user, &defs)
+            .with_context(|| format!("the user {}", user.name))?;
+        record
+            .write(&dir)
+            .with_context(|| format!("writing the record of {}", user.name))?;
+        debug!("wrote the user record of {}", user.name);
+        written += 1;
+    }
+    info!("wrote {written} user records to /{}", userdb::DROPIN_DIR);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use cap_std_ext::cap_tempfile::utf8::TempDir;
+    use cap_std_ext::dirext::CapStdExtDirExtUtf8;
     use indoc::indoc;
 
     use super::*;
@@ -651,5 +665,30 @@ mod tests {
     fn passes_a_complete_lock_file() -> Result<()> {
         let fixture = Fixture::new(TestDistro::default(), Some(LOCK), "")?;
         run(&Check::ALL, &fixture.accounts())
+    }
+
+    #[test]
+    fn writes_records_for_every_user_but_root_and_nobody() -> Result<()> {
+        let root = rootfs()?;
+        root.create_dir("etc")?;
+        root.write("etc/passwd", USERS)?;
+        write_user_records(&root)?;
+        let names = root.open_dir(userdb::DROPIN_DIR)?.filenames_sorted()?;
+        assert_eq!(
+            names,
+            [
+                "33.user",
+                "900.user",
+                "971.user",
+                "avahi.user",
+                "http.user",
+                "tss.user"
+            ]
+        );
+        assert!(
+            root.read_to_string("usr/lib/userdb/http.user")?
+                .contains("\"disposition\": \"system\"")
+        );
+        Ok(())
     }
 }

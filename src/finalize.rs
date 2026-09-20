@@ -36,6 +36,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
 
     accounts::check_accounts(&root, distro, &opts.sysusers_lock)
         .context("checking the accounts")?;
+    accounts::write_user_records(&root).context("writing the user records")?;
     initramfs::build_initramfs(&root).context("building the initramfs")?;
     identity::remove_machine_identity(&root, distro).context("removing machine identity")?;
 
