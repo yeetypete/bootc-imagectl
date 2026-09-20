@@ -1,6 +1,7 @@
 //! Distribution-specific behaviour.
 
 use anyhow::{Context, Result};
+use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 
 mod arch;
@@ -36,6 +37,21 @@ pub trait Distro: std::fmt::Debug {
     ///
     /// Fails on any filesystem error in the rootfs.
     fn remove_repository_indexes(&self, root: &Dir) -> Result<()>;
+
+    /// The name of the installed package that owns `path`, an absolute path
+    /// in the image, or `None` if no package does.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the package manager cannot answer.
+    fn package_owning(&self, path: &Utf8Path) -> Result<Option<String>>;
+
+    /// Whether the package `name` is installed.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the package manager cannot answer.
+    fn is_installed(&self, name: &str) -> Result<bool>;
 }
 
 /// The distribution an os-release `ID` or `ID_LIKE` entry names, if supported.

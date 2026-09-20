@@ -56,29 +56,7 @@ pub(crate) fn remove_machine_identity(root: &Dir, distro: &dyn Distro) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::rootfs;
-
-    /// A distribution whose packages generate no machine identity files.
-    #[derive(Debug)]
-    struct NoIdentity;
-
-    impl Distro for NoIdentity {
-        fn name(&self) -> &'static str {
-            "test"
-        }
-
-        fn remove_machine_identity(&self, _root: &Dir) -> Result<()> {
-            Ok(())
-        }
-
-        fn move_package_database(&self, _root: &Dir) -> Result<()> {
-            Ok(())
-        }
-
-        fn remove_repository_indexes(&self, _root: &Dir) -> Result<()> {
-            Ok(())
-        }
-    }
+    use crate::testutil::{TestDistro, rootfs};
 
     #[test]
     fn removes_build_time_identity() -> Result<()> {
@@ -94,7 +72,7 @@ mod tests {
         root.write("etc/passwd-", b"backup")?;
         root.write("etc/.pwd.lock", b"")?;
 
-        remove_machine_identity(&root, &NoIdentity)?;
+        remove_machine_identity(&root, &TestDistro::default())?;
 
         assert_eq!(root.read("etc/machine-id")?, b"");
         assert!(!root.exists("etc/ssh/ssh_host_ed25519_key"));
@@ -112,7 +90,7 @@ mod tests {
     fn creates_missing_machine_id() -> Result<()> {
         let root = rootfs()?;
         root.create_dir("etc")?;
-        remove_machine_identity(&root, &NoIdentity)?;
+        remove_machine_identity(&root, &TestDistro::default())?;
         assert_eq!(root.read("etc/machine-id")?, b"");
         Ok(())
     }
