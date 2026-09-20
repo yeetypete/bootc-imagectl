@@ -14,7 +14,7 @@ groups created during a bootc image build.
 | NSS | The Name Service Switch, glibc's mechanism for looking up users and groups from the sources listed in `/etc/nsswitch.conf`. nss-systemd is the source that resolves lookups from systemd's user database. | nsswitch.conf(5), nss-systemd(8) |
 | User record | The JSON description of a user defined by systemd. | [User Record](https://systemd.io/USER_RECORD/) |
 | Drop-in directory | A directory such as `/usr/lib/userdb` from which systemd-userdbd reads user records. | systemd-userdbd(8) |
-| Membership file | A file `<user>:<group>.membership` in a drop-in directory that makes a user a member of a group. | systemd-userdbd(8) |
+| Membership file | A file `<user>:<group>.membership` in a drop-in directory that makes a user a member of a group. | nss-systemd(8) |
 | Privileged user record | A file `<name>.user-privileged` next to a user record, readable only by root, that holds the fields of the record only root may see, such as the password hash. | systemd-userdbd(8) |
 
 ## Overview
@@ -180,11 +180,11 @@ It performs the following steps:
    password hash, writes it to the privileged user record
    `/usr/lib/userdb/<name>.user-privileged` with mode `0600`. Otherwise sets
    `locked` `true`.
-4. Removes the users with records from `/etc/passwd` and `/etc/shadow`, and
-   checks that they still resolve through NSS.
-5. Moves every membership whose user has a record out of the member lists in
-   `/etc/group` and `/etc/gshadow` and into an empty
-   `/usr/lib/userdb/<user>:<group>.membership` file.
+4. Writes an empty `/usr/lib/userdb/<user>:<group>.membership` file for
+   every user with a record and each group it belongs to.
+5. Removes the users with records from `/etc/passwd` and `/etc/shadow`, and
+   their names from the member lists in `/etc/group` and `/etc/gshadow`, and
+   checks that the users and their memberships still resolve through NSS.
 
 Groups keep their `/etc/group` entries. Only their members move.
 
