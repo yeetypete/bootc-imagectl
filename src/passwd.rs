@@ -243,13 +243,39 @@ impl fmt::Display for Group {
     }
 }
 
+/// The password field of shadow(5) and gshadow(5): a crypt(3) hash, or a
+/// value that matches no password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Password(String);
+
+impl Password {
+    /// The hash, unless the field is empty or starts with `!` or `*`, which
+    /// disable the password.
+    #[must_use]
+    pub fn hash(&self) -> Option<&str> {
+        let field = self.0.as_str();
+        (!field.is_empty() && !field.starts_with(['!', '*'])).then_some(field)
+    }
+}
+
+impl From<&str> for Password {
+    fn from(field: &str) -> Self {
+        Self(field.to_owned())
+    }
+}
+
+impl fmt::Display for Password {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// A shadow(5) entry: a user's password and its aging.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shadow {
     pub name: Name,
-    /// The password hash, or a value such as `*` or `!` that matches no
-    /// password. Empty if no password is needed.
-    pub password: String,
+    /// The password. Empty if no password is needed.
+    pub password: Password,
     /// The day of the last password change. Day 0 forces a change at the
     /// next login.
     pub last_change: Option<Date>,
@@ -290,7 +316,7 @@ impl FromStr for Shadow {
         );
         Ok(Self {
             name: name.parse()?,
-            password: password.to_owned(),
+            password: password.into(),
             last_change: optional(last_change).context("last password change")?,
             min_age: optional(min_age).context("minimum password age")?,
             max_age: optional(max_age).context("maximum password age")?,
@@ -322,9 +348,8 @@ impl fmt::Display for Shadow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gshadow {
     pub name: Name,
-    /// The password hash, or a value such as `*` or `!` that matches no
-    /// password. Empty if only members may use `newgrp`.
-    pub password: String,
+    /// The password. Empty if only members may use `newgrp`.
+    pub password: Password,
     /// The users that may change the group's password and members.
     pub administrators: Vec<Name>,
     /// The same members as in group(5).
@@ -342,7 +367,7 @@ impl FromStr for Gshadow {
         let [name, password, administrators, members] = fields(line)?;
         Ok(Self {
             name: name.parse()?,
-            password: password.to_owned(),
+            password: password.into(),
             administrators: parse_names(administrators).context("administrators")?,
             members: parse_names(members).context("members")?,
         })
@@ -371,6 +396,14 @@ mod tests {
 
     fn name(name: &str) -> Name {
         name.parse().expect("a valid name")
+    }
+
+    #[test]
+    fn password_hash_is_absent_when_disabled() {
+        assert_eq!(Password::from("$6$salt$hash").hash(), Some("$6$salt$hash"));
+        for disabled in ["", "!", "*", "!*", "!!", "!$6$salt$hash"] {
+            assert_eq!(Password::from(disabled).hash(), None, "{disabled:?}");
+        }
     }
 
     #[test]

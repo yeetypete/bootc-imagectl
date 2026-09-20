@@ -44,6 +44,9 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     ostree \
     zstd
 
+# A regular user with a password, for the tests of the privileged user records.
+RUN echo 'archie:password' | chpasswd
+
 COPY --from=bootc-builder /out/usr/ /usr/
 
 # Bootc links against the installed libostree.

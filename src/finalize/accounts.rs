@@ -15,7 +15,7 @@ use tracing::{debug, info};
 
 use crate::distro::Distro;
 use crate::login_defs::LoginDefs;
-use crate::passwd::{self, Entry as _, Passwd, is_intrinsic, non_empty};
+use crate::passwd::{self, Entry as _, Passwd, Shadow, is_intrinsic, non_empty};
 use crate::sysusers::lockfile::{Block, LockFile, Package};
 use crate::sysusers::{self, Entry, Id, Index, Membership, PrimaryGroup, User};
 use crate::userdb::{self, UserRecord};
@@ -424,6 +424,8 @@ pub(super) fn check_accounts(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -
 
 /// Write a user record for every user in /etc/passwd other than root and
 /// nobody, which nss-systemd synthesizes itself, to the drop-in directory.
+/// A user with a password hash in /etc/shadow gets a privileged record with
+/// the hash, every other user is locked.
 ///
 /// # Errors
 ///
@@ -432,12 +434,18 @@ pub(super) fn check_accounts(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -
 pub(super) fn write_user_records(root: &Dir) -> Result<()> {
     let defs = LoginDefs::read(root)?;
     let users = Passwd::read_all(root)?;
+    let shadows = Shadow::read_all(root)?;
+    let shadow_of: BTreeMap<_, _> = shadows
+        .iter()
+        .map(|shadow| (&shadow.name, shadow))
+        .collect();
     root.create_dir_all(userdb::DROPIN_DIR)
         .with_context(|| format!("creating /{}", userdb::DROPIN_DIR))?;
     let dir = root.open_dir(userdb::DROPIN_DIR)?;
     let mut written = 0;
     for user in users.iter().filter(|user| !is_intrinsic(user.uid)) {
-        let record = UserRecord::from_passwd(user, &defs)
+        let shadow = shadow_of.get(&user.name).copied();
+        let record = UserRecord::from_passwd(user, shadow, &defs)
             .with_context(|| format!("the user {}", user.name))?;
         record
             .write(&dir)
@@ -667,24 +675,35 @@ mod tests {
         run(&Check::ALL, &fixture.accounts())
     }
 
+    const SHADOW: &str = indoc! {"
+        root:!*:20702::::::
+        avahi:!*:20702:::::1:
+        http:$6$salt$hash:20702::::::
+    "};
+
     #[test]
     fn writes_records_for_every_user_but_root_and_nobody() -> Result<()> {
         let root = rootfs()?;
         root.create_dir("etc")?;
         root.write("etc/passwd", USERS)?;
+        root.write("etc/shadow", SHADOW)?;
         write_user_records(&root)?;
         let names = root.open_dir(userdb::DROPIN_DIR)?.filenames_sorted()?;
         assert_eq!(
             names,
             [
                 "33.user",
+                "33.user-privileged",
                 "900.user",
                 "971.user",
                 "avahi.user",
                 "http.user",
-                "tss.user"
+                "http.user-privileged",
+                "tss.user",
             ]
         );
+        let tss = root.read_to_string("usr/lib/userdb/tss.user")?;
+        assert!(tss.contains("\"locked\": true"), "{tss}");
         assert!(
             root.read_to_string("usr/lib/userdb/http.user")?
                 .contains("\"disposition\": \"system\"")
