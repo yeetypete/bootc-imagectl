@@ -43,7 +43,7 @@ required-features = ["vm"]
 
 [dependencies]
 anyhow = { workspace = true }
-cap-std-ext = "5"
+cap-std-ext = { version = "5", features = ["fs_utf8"] }
 clap = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

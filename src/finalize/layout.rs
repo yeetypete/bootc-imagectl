@@ -3,8 +3,8 @@
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use cap_std_ext::cap_std::fs::Dir;
-use cap_std_ext::dirext::CapStdExtDirExt;
+use cap_std_ext::cap_std::fs_utf8::Dir;
+use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use tracing::debug;
 
 use super::tmpfiles::{self, Entry};
@@ -104,8 +104,6 @@ pub(crate) fn layout_toplevel(root: &Dir) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::*;
     use crate::testutil::rootfs;
 
@@ -122,7 +120,7 @@ mod tests {
         for entry in LAYOUT {
             if let Entry::Symlink { path, target } = entry {
                 let link = path.trim_start_matches('/');
-                assert_eq!(root.read_link(link)?, Path::new(target), "{path}");
+                assert_eq!(root.read_link(link)?, *target, "{path}");
             }
         }
         Ok(())
@@ -170,7 +168,7 @@ mod tests {
         let root = rootfs()?;
         layout_toplevel(&root)?;
         layout_toplevel(&root)?;
-        assert_eq!(root.read_link("home")?, Path::new("var/home"));
+        assert_eq!(root.read_link("home")?, "var/home");
         Ok(())
     }
 }

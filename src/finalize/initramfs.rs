@@ -3,9 +3,9 @@
 
 use std::process::Command;
 
-use anyhow::{Context, Result, anyhow, bail};
-use cap_std_ext::cap_std::fs::{Dir, Permissions, PermissionsExt};
-use cap_std_ext::dirext::CapStdExtDirExt;
+use anyhow::{Context, Result, bail};
+use cap_std_ext::cap_std::fs_utf8::{Dir, Permissions, PermissionsExt};
+use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use tracing::debug;
 
 use crate::command::CommandRunExt;
@@ -20,11 +20,7 @@ fn kernel_version(root: &Dir) -> Result<String> {
         for entry in modules.entries()? {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
-                let name = entry
-                    .file_name()
-                    .into_string()
-                    .map_err(|name| anyhow!("kernel directory {} is not UTF-8", name.display()))?;
-                kvers.push(name);
+                kvers.push(entry.file_name()?);
             }
         }
     }

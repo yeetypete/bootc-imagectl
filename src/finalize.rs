@@ -8,7 +8,7 @@
 
 use anyhow::{Context, Result};
 use cap_std_ext::cap_std::ambient_authority;
-use cap_std_ext::cap_std::fs::Dir;
+use cap_std_ext::cap_std::fs_utf8::Dir;
 use tracing::info;
 use uzers::UsersCache;
 

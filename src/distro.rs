@@ -1,7 +1,7 @@
 //! Distribution-specific behaviour.
 
 use anyhow::{Context, Result};
-use cap_std_ext::cap_std::fs::Dir;
+use cap_std_ext::cap_std::fs_utf8::Dir;
 
 mod arch;
 mod os_release;
@@ -69,7 +69,7 @@ mod tests {
     use super::*;
     use crate::testutil::rootfs;
 
-    fn with_os_release(content: &str) -> Result<cap_std_ext::cap_tempfile::TempDir> {
+    fn with_os_release(content: &str) -> Result<cap_std_ext::cap_tempfile::utf8::TempDir> {
         let root = rootfs()?;
         root.create_dir_all("etc")?;
         root.write("etc/os-release", content)?;
