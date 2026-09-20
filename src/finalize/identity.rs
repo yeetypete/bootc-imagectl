@@ -2,8 +2,8 @@
 //! The machine identity must instead be generated on first boot.
 
 use anyhow::{Context, Result};
-use cap_std_ext::cap_std::fs::Dir;
-use cap_std_ext::dirext::CapStdExtDirExt;
+use cap_std_ext::cap_std::fs_utf8::Dir;
+use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 use tracing::debug;
 
 use crate::distro::Distro;
@@ -20,10 +20,10 @@ pub(crate) fn remove_machine_identity(root: &Dir, distro: &dyn Distro) -> Result
     // first boot.
     if let Some(ssh) = root.open_dir_optional("etc/ssh")? {
         for entry in ssh.entries()? {
-            let name = entry?.file_name();
-            if name.as_encoded_bytes().starts_with(b"ssh_host_") {
+            let name = entry?.file_name()?;
+            if name.starts_with("ssh_host_") {
                 ssh.remove_file(&name)
-                    .with_context(|| format!("removing /etc/ssh/{}", name.display()))?;
+                    .with_context(|| format!("removing /etc/ssh/{name}"))?;
             }
         }
     }
@@ -31,7 +31,10 @@ pub(crate) fn remove_machine_identity(root: &Dir, distro: &dyn Distro) -> Result
     // Unless the container runtime bind-mounted one, which is not part of
     // the image.
     if root.symlink_metadata_optional("etc/resolv.conf")?.is_some()
-        && !root.is_mountpoint("etc/resolv.conf")?.unwrap_or_default()
+        && !root
+            .as_cap_std()
+            .is_mountpoint("etc/resolv.conf")?
+            .unwrap_or_default()
     {
         root.remove_file("etc/resolv.conf")
             .context("removing /etc/resolv.conf")?;

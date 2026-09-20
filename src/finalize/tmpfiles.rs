@@ -3,13 +3,12 @@
 //! declare, so the generated /var entries (see var.rs) do not repeat them.
 
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::fmt::{self, Write};
-use std::path::Path;
 
 use anyhow::{Context, Result};
-use cap_std_ext::cap_std::fs::Dir;
-use cap_std_ext::dirext::CapStdExtDirExt;
+use cap_std_ext::camino::Utf8Path;
+use cap_std_ext::cap_std::fs_utf8::Dir;
+use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 use tracing::debug;
 
 /// Where packages install their tmpfiles.d files. Generated files go here too.
@@ -114,14 +113,13 @@ pub(super) fn declared_paths(root: &Dir) -> Result<HashSet<String>> {
             continue;
         };
         for entry in confs.entries()? {
-            let entry = entry?;
-            let name = entry.file_name();
-            if Path::new(&name).extension() != Some(OsStr::new("conf")) {
+            let name = entry?.file_name()?;
+            if Utf8Path::new(&name).extension() != Some("conf") {
                 continue;
             }
             let content = confs
                 .read_to_string(&name)
-                .with_context(|| format!("reading /{dir}/{}", name.display()))?;
+                .with_context(|| format!("reading /{dir}/{name}"))?;
             declared.extend(content.lines().filter_map(entry_path).map(expand_specifier));
         }
     }
@@ -144,6 +142,7 @@ pub(super) fn patch_tmpfiles(root: &Dir) -> Result<()> {
     // systemd warns about duplicates at boot.
     let provision = format!("{USR_TMPFILES_DIR}/provision.conf");
     if let Some(content) = root
+        .as_cap_std()
         .read_to_string_optional(&provision)
         .context("reading provision.conf")?
     {

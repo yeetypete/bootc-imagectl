@@ -1,10 +1,9 @@
 //! Arch Linux and derivatives.
 
-use std::path::Path;
-
 use anyhow::{Context, Result};
-use cap_std_ext::cap_std::fs::Dir;
-use cap_std_ext::dirext::CapStdExtDirExt;
+use cap_std_ext::camino::Utf8Path;
+use cap_std_ext::cap_std::fs_utf8::Dir;
+use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 
 use super::Distro;
 use crate::fs::move_dir;
@@ -19,6 +18,7 @@ const USR_DB_PATH: &str = "usr/lib/sysimage/pacman";
 /// normally relocates it under `/usr` with the `DBPath` option.
 fn db_path(root: &Dir) -> Result<String> {
     let conf = root
+        .as_cap_std()
         .read_to_string_optional("etc/pacman.conf")
         .context("reading /etc/pacman.conf")?
         .unwrap_or_default();
@@ -50,7 +50,7 @@ impl Distro for Arch {
     /// already outside /var is left where it is.
     fn move_package_database(&self, root: &Dir) -> Result<()> {
         let from = db_path(root)?;
-        if !Path::new(&from).starts_with("var") {
+        if !Utf8Path::new(&from).starts_with("var") {
             return Ok(());
         }
         root.create_dir_all("usr/lib/sysimage")?;
@@ -85,9 +85,9 @@ impl Distro for Arch {
             return Ok(());
         };
         for entry in dir.entries()? {
-            let name = entry?.file_name();
+            let name = entry?.file_name()?;
             dir.remove_all_optional(&name)
-                .with_context(|| format!("removing /{sync}/{}", name.display()))?;
+                .with_context(|| format!("removing /{sync}/{name}"))?;
         }
         Ok(())
     }

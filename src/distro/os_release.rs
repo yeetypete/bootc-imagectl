@@ -1,7 +1,7 @@
 //! A subset of os-release(5) needed to identify a distribution.
 
 use anyhow::{Context, Result, bail};
-use cap_std_ext::cap_std::fs::Dir;
+use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExt;
 
 /// Identification fields from os-release.
@@ -25,6 +25,7 @@ impl OsRelease {
 pub(super) fn read(root: &Dir) -> Result<OsRelease> {
     for path in ["etc/os-release", "usr/lib/os-release"] {
         if let Some(content) = root
+            .as_cap_std()
             .read_to_string_optional(path)
             .with_context(|| format!("reading /{path}"))?
         {
@@ -76,7 +77,7 @@ mod tests {
 
     /// A rootfs laid out like Debian, Ubuntu and Fedora images.
     /// `/etc/os-release` is a relative symlink to `/usr/lib/os-release`.
-    fn with_os_release(content: &str) -> Result<cap_std_ext::cap_tempfile::TempDir> {
+    fn with_os_release(content: &str) -> Result<cap_std_ext::cap_tempfile::utf8::TempDir> {
         let root = rootfs()?;
         root.create_dir_all("usr/lib")?;
         root.create_dir_all("etc")?;

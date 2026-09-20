@@ -8,8 +8,8 @@ use std::ops::ControlFlow;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use cap_std_ext::cap_std::fs::{Dir, MetadataExt, Permissions, PermissionsExt};
-use cap_std_ext::dirext::{CapStdExtDirExt, WalkConfiguration};
+use cap_std_ext::cap_std::fs_utf8::{Dir, MetadataExt, Permissions, PermissionsExt};
+use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8, WalkConfiguration};
 use tracing::{debug, info};
 use uzers::{Groups, Users};
 
@@ -34,10 +34,10 @@ fn next_tmpfiles_path(root: &Dir) -> Result<String> {
     let mut last = 0;
     if let Some(dir) = root.open_dir_optional(tmpfiles::USR_TMPFILES_DIR)? {
         for entry in dir.entries()? {
-            let name = entry?.file_name();
+            let name = entry?.file_name()?;
             let number = name
-                .to_str()
-                .and_then(|name| name.strip_prefix(GENERATED_PREFIX)?.strip_suffix(".conf"))
+                .strip_prefix(GENERATED_PREFIX)
+                .and_then(|name| name.strip_suffix(".conf"))
                 .and_then(|number| number.parse::<u32>().ok());
             if let Some(number) = number {
                 last = last.max(number);
@@ -68,6 +68,8 @@ pub(super) fn write_var_tmpfiles(root: &Dir, db: &(impl Users + Groups)) -> Resu
     // Files are skipped, tmpfiles.d cannot recreate them.
     if let Some(var) = root.open_dir_optional("var")? {
         let config = WalkConfiguration::default().path_base(Path::new("/var"));
+        // The walk yields byte paths, which tmpfiles.d needs as UTF-8.
+        let var = var.as_cap_std();
         var.walk(&config, |e| -> Result<ControlFlow<()>> {
             let path = e
                 .path
@@ -136,13 +138,13 @@ pub(super) fn empty_var(root: &Dir) -> Result<()> {
             continue;
         };
         for entry in entries.entries()? {
-            let name = entry?.file_name();
+            let name = entry?.file_name()?;
             match entries.remove_all_optional(&name) {
                 // The container runtime bind-mounts files such as
                 // /run/.containerenv and /run/secrets into the build.
                 Err(e) if e.kind() == ErrorKind::ResourceBusy => {}
                 result => {
-                    result.with_context(|| format!("removing /{dir}/{}", name.display()))?;
+                    result.with_context(|| format!("removing /{dir}/{name}"))?;
                 }
             }
         }
@@ -150,9 +152,9 @@ pub(super) fn empty_var(root: &Dir) -> Result<()> {
 
     if let Some(var) = root.open_dir_optional("var")? {
         for entry in var.entries()? {
-            let name = entry?.file_name();
+            let name = entry?.file_name()?;
             var.remove_all_optional(&name)
-                .with_context(|| format!("removing /var/{}", name.display()))?;
+                .with_context(|| format!("removing /var/{name}"))?;
         }
     }
 
@@ -307,13 +309,13 @@ mod tests {
         assert_eq!(root.read_dir("tmp")?.count(), 0);
         let mut kept: Vec<_> = root
             .read_dir("var")?
-            .map(|e| e.map(|e| e.file_name()))
+            .map(|e| e?.file_name())
             .collect::<Result<_, _>>()?;
         kept.sort();
         assert_eq!(kept, ["lock", "run", "tmp"]);
         assert_eq!(root.metadata("var/tmp")?.mode() & 0o7777, 0o1777);
-        assert_eq!(root.read_link("var/run")?, Path::new("../run"));
-        assert_eq!(root.read_link("var/lock")?, Path::new("../run/lock"));
+        assert_eq!(root.read_link("var/run")?, "../run");
+        assert_eq!(root.read_link("var/lock")?, "../run/lock");
         Ok(())
     }
 

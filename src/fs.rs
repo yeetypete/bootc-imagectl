@@ -1,13 +1,13 @@
 //! Filesystem operations.
 
 use anyhow::{Result, bail};
-use cap_std_ext::cap_std::fs::Dir;
+use cap_std_ext::cap_std::fs_utf8::Dir;
 
 /// Copy the tree under `from` into `to`, which exists and is empty.
 pub(crate) fn copy_dir(from: &Dir, to: &Dir) -> Result<()> {
     for entry in from.entries()? {
         let entry = entry?;
-        let name = entry.file_name();
+        let name = entry.file_name()?;
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
             to.create_dir(&name)?;
@@ -16,7 +16,7 @@ pub(crate) fn copy_dir(from: &Dir, to: &Dir) -> Result<()> {
         } else if file_type.is_file() {
             from.copy(&name, to, &name)?;
         } else {
-            bail!("{} is neither a file nor a directory", name.display());
+            bail!("{name} is neither a file nor a directory");
         }
     }
     Ok(())
