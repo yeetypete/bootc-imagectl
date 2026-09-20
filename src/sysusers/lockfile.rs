@@ -38,7 +38,7 @@ const PACKAGE_HEADER: &str = "package:";
 const LOCK_DIR: &str = "usr/lib/sysusers.d";
 
 /// The package a block attributes its accounts to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Package {
     /// `# package: <name>`: the package that created the accounts.
     Named(String),
@@ -48,7 +48,6 @@ pub enum Package {
     /// `# package:` with no name. `finalize` prints this for accounts it
     /// cannot attribute, and the author fills the name in. A lock file
     /// with such a block does not parse.
-    #[allow(dead_code, reason = "constructed once finalize prints missing lines")]
     Unknown,
 }
 
@@ -167,11 +166,6 @@ impl LockFile {
             .map(Some)
             .with_context(|| format!("parsing /{path}"))
     }
-
-    /// The entries of every block, in file order.
-    pub fn entries(&self) -> impl Iterator<Item = &Entry> {
-        self.blocks.iter().flat_map(|block| &block.entries)
-    }
 }
 
 impl fmt::Display for Block {
@@ -248,7 +242,13 @@ mod tests {
                 group: "adm".parse()?,
             })
         );
-        assert_eq!(lock.entries().count(), 6);
+        assert_eq!(
+            lock.blocks
+                .iter()
+                .map(|block| block.entries.len())
+                .sum::<usize>(),
+            6
+        );
         Ok(())
     }
 

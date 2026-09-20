@@ -34,7 +34,8 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     let distro = distro::detect(&root).context("detecting the distribution")?;
     info!("finalizing a {} rootfs", distro.name());
 
-    accounts::read_accounts(&root, &opts.sysusers_lock).context("reading the accounts")?;
+    accounts::check_accounts(&root, distro, &opts.sysusers_lock)
+        .context("checking the accounts")?;
     initramfs::build_initramfs(&root).context("building the initramfs")?;
     identity::remove_machine_identity(&root, distro).context("removing machine identity")?;
 

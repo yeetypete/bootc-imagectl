@@ -20,11 +20,16 @@ use cap_std_ext::cap_std::fs_utf8::Dir;
 use crate::sysusers::{Name, parse_id};
 
 /// An entry of one of the account files.
-pub(crate) trait Entry: FromStr<Err = anyhow::Error> + fmt::Display + fmt::Debug {
+pub trait Entry: FromStr<Err = anyhow::Error> + fmt::Display + fmt::Debug {
     /// The file the entries live in, relative to the rootfs.
     const PATH: &str;
 
     /// Read the entries of the file in the rootfs.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be read or a line does not parse. The error
+    /// names the file and the line.
     fn read_all(root: &Dir) -> Result<Vec<Self>> {
         let content = root
             .read_to_string(Self::PATH)

@@ -30,6 +30,11 @@ FROM ${ARCH_IMAGE} AS image
 RUN mkdir -p /etc/pacman.d/hooks && \
     touch /etc/pacman.d/hooks/60-dracut-remove.hook /etc/pacman.d/hooks/90-dracut-install.hook
 
+# Create every user and group with the UID and GID the sysusers lock file fixes
+# before any package can allocate a different one.
+COPY system_files/usr/lib/sysusers.d/00-bootc-imagectl.conf /usr/lib/sysusers.d/
+RUN systemd-sysusers
+
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman -Syu --noconfirm --needed \
     base \

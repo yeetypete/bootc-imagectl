@@ -1,6 +1,8 @@
 //! Arch Linux and derivatives.
 
-use anyhow::{Context, Result};
+use std::process::Command;
+
+use anyhow::{Context, Result, bail};
 use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
@@ -91,6 +93,37 @@ impl Distro for Arch {
         }
         Ok(())
     }
+
+    fn package_owning(&self, path: &Utf8Path) -> Result<Option<String>> {
+        let owner = query(&["-Qqo", path.as_str()], "No package owns")?;
+        Ok(owner.map(|owner| owner.trim().to_owned()))
+    }
+
+    fn is_installed(&self, name: &str) -> Result<bool> {
+        Ok(query(&["-Q", name], "was not found")?.is_some())
+    }
+}
+
+/// Query the local pacman database. Returns pacman's output, or `None` if
+/// it fails with `not_found` in its error message.
+fn query(args: &[&str], not_found: &str) -> Result<Option<String>> {
+    let output = Command::new("pacman")
+        .args(args)
+        .output()
+        .context("running pacman")?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() {
+        return Ok(Some(String::from_utf8(output.stdout)?));
+    }
+    if stderr.contains(not_found) {
+        return Ok(None);
+    }
+    bail!(
+        "pacman {} failed with {}: {}",
+        args.join(" "),
+        output.status,
+        stderr.trim()
+    )
 }
 
 #[cfg(test)]

@@ -29,9 +29,12 @@ use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 
 use word::WHITESPACE;
 
+mod index;
 pub(crate) mod lockfile;
 mod parse;
 mod word;
+
+pub use index::{Configuration, Index};
 
 /// The directories systemd-sysusers reads, relative to the rootfs, in order
 /// of precedence. A file in an earlier directory overrides a file of the same
@@ -171,6 +174,18 @@ pub struct User {
     pub shell: Option<Utf8PathBuf>,
     /// `u!`: the account is fully locked, not just without a password.
     pub locked: bool,
+}
+
+impl User {
+    /// The group a `u` line implicitly creates, with the user's name and
+    /// UID, unless the ID field names a primary group.
+    #[must_use]
+    pub fn implicit_group(&self) -> Option<Group> {
+        self.primary_group.is_none().then(|| Group {
+            name: self.name.clone(),
+            gid: self.uid.clone(),
+        })
+    }
 }
 
 /// A `g` line: a system group.
