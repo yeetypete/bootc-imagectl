@@ -47,10 +47,11 @@ cap-std-ext = "5"
 clap = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uzers = { version = "0.12", default-features = false, features = ["cache", "mock"] }
+uzers = { version = "0.12", default-features = false, features = ["cache"] }
 
 [dev-dependencies]
 indoc = "2"
+uzers = { version = "0.12", default-features = false, features = ["mock"] }
 
 [features]
 container = []
