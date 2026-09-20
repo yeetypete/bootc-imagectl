@@ -9,6 +9,7 @@ use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use tracing::debug;
 
 use crate::command::CommandRunExt;
+use crate::userdb::DROPIN_DIR;
 
 /// Where the kernel packages install to.
 const MODULES: &str = "usr/lib/modules";
@@ -46,7 +47,8 @@ pub(super) fn build_initramfs(root: &Dir) -> Result<()> {
     let initramfs = format!("{moddir}/initramfs.img");
 
     Command::new("depmod").arg(&kver).run()?;
-    Command::new("dracut")
+    let mut dracut = Command::new("dracut");
+    dracut
         .args([
             "--force",
             "--no-hostonly",
@@ -55,8 +57,16 @@ pub(super) fn build_initramfs(root: &Dir) -> Result<()> {
             "--verbose",
         ])
         .args(["--kver", &kver])
-        .arg(format!("/{initramfs}"))
-        .run()?;
+        // dracut installs the NSS modules, but without the host's
+        // nsswitch.conf glibc never consults nss-systemd in the initramfs.
+        .args(["--install", "/etc/nsswitch.conf"]);
+    // Copy the user records so that nss-systemd resolves the same users in
+    // the initramfs as in the booted system.
+    let userdb = format!("/{DROPIN_DIR}");
+    if root.is_dir(DROPIN_DIR) {
+        dracut.args(["--include", &userdb, &userdb]);
+    }
+    dracut.arg(format!("/{initramfs}")).run()?;
     root.set_permissions(&initramfs, Permissions::from_mode(0o600))
         .with_context(|| format!("setting the mode of /{initramfs}"))?;
     Ok(())
