@@ -326,7 +326,7 @@ pub struct ConfigFile {
 }
 
 /// Parse a UID or GID.
-fn parse_id(field: &str) -> Result<u32> {
+pub(crate) fn parse_id(field: &str) -> Result<u32> {
     let is_plain_decimal =
         field.bytes().all(|b| b.is_ascii_digit()) && (field == "0" || !field.starts_with('0'));
     let id: u32 = is_plain_decimal
