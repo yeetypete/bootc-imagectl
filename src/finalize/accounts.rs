@@ -4,10 +4,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
+use std::ops::ControlFlow;
 
 use anyhow::{Context, Result, bail};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
+use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
+use cap_std_ext::dirext::{CapStdExtDirExt, WalkConfiguration};
 use tracing::{debug, info};
 
 use crate::distro::Distro;
@@ -27,8 +30,13 @@ fn is_intrinsic(id: u32) -> bool {
     matches!(id, ROOT_ID | NOBODY_ID)
 }
 
+/// The directories whose paths must be owned by accounts in the image,
+/// relative to the rootfs.
+const OWNED_DIRS: [&str; 2] = ["usr", "etc"];
+
 /// What the account checks look at.
 struct Accounts<'a> {
+    root: &'a Dir,
     distro: &'a dyn Distro,
     /// The lock file's path, relative to the rootfs.
     lock_path: &'a Utf8Path,
@@ -48,6 +56,40 @@ impl Accounts<'_> {
     /// The groups the lock file must cover.
     fn groups_to_lock(&self) -> impl Iterator<Item = &passwd::Group> {
         self.groups.iter().filter(|group| !is_intrinsic(group.gid))
+    }
+
+    /// Whether a user or group in /etc has the ID.
+    fn resolves(&self, owner: Owner) -> bool {
+        match owner {
+            Owner::Uid(uid) => self.users.iter().any(|user| user.uid == uid),
+            Owner::Gid(gid) => self.groups.iter().any(|group| group.gid == gid),
+        }
+    }
+}
+
+/// The ID a path is owned by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Owner {
+    Uid(u32),
+    Gid(u32),
+}
+
+impl Owner {
+    /// The kind of account that has the ID.
+    fn account(self) -> &'static str {
+        match self {
+            Self::Uid(_) => "user",
+            Self::Gid(_) => "group",
+        }
+    }
+}
+
+impl fmt::Display for Owner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Uid(uid) => write!(f, "UID {uid}"),
+            Self::Gid(gid) => write!(f, "GID {gid}"),
+        }
     }
 }
 
@@ -87,26 +129,30 @@ enum Check {
     Lock,
     /// Every fixed UID and GID is the one the build allocated.
     Drift,
+    /// Every path under /usr and /etc is owned by a user and group in /etc.
+    Ownership,
     /// Every package the lock file names is installed.
     Stale,
 }
 
 impl Check {
-    const ALL: [Self; 3] = [Self::Lock, Self::Drift, Self::Stale];
+    const ALL: [Self; 4] = [Self::Lock, Self::Drift, Self::Ownership, Self::Stale];
 
     /// Issues the check found, one finding per line. Empty if it passed.
     fn run(self, accounts: &Accounts<'_>) -> Result<Vec<String>> {
         match self {
             Self::Lock => missing_lines(accounts),
             Self::Drift => Ok(drifted_ids(accounts)),
+            Self::Ownership => unresolved_owners(accounts),
             Self::Stale => stale_packages(accounts),
         }
     }
 
-    /// What the developer does about the findings.
-    fn help(self, accounts: &Accounts<'_>) -> String {
+    /// What the developer does about the findings, if there is one thing
+    /// to do.
+    fn help(self, accounts: &Accounts<'_>) -> Option<String> {
         let lock = accounts.lock_path;
-        match self {
+        let help = match self {
             Self::Lock if accounts.lock.is_some() => format!(
                 "add these lines to /{lock}, fill in each blank '# package:' header, and rebuild"
             ),
@@ -116,10 +162,12 @@ impl Check {
             Self::Drift => format!(
                 "systemd-sysusers keeps the ID of an existing account, so apply /{lock} before any package creates these accounts, or correct their IDs in it"
             ),
+            Self::Ownership => return None,
             Self::Stale => format!(
                 "remove the package's block from /{lock}, or change its header to '# package: -' if its accounts are kept on purpose"
             ),
-        }
+        };
+        Some(help)
     }
 }
 
@@ -128,6 +176,7 @@ impl fmt::Display for Check {
         f.write_str(match self {
             Self::Lock => "lock",
             Self::Drift => "drift",
+            Self::Ownership => "ownership",
             Self::Stale => "stale",
         })
     }
@@ -232,7 +281,7 @@ fn group_by_package(missing: Vec<Entry>, accounts: &Accounts<'_>) -> Result<Lock
     })
 }
 
-/// The lock check: the lines the lock file lacks, as one finding.
+/// Lock check: the lines the lock file lacks.
 fn missing_lines(accounts: &Accounts<'_>) -> Result<Vec<String>> {
     let missing = missing(accounts);
     if missing.is_empty() {
@@ -242,7 +291,7 @@ fn missing_lines(accounts: &Accounts<'_>) -> Result<Vec<String>> {
     Ok(vec![lines.to_string()])
 }
 
-/// The drift check: the accounts whose fixed ID is not the one in /etc.
+/// Drift check: the accounts whose fixed ID is not the one in /etc.
 fn drifted_ids(accounts: &Accounts<'_>) -> Vec<String> {
     let index = &accounts.index;
     let mut findings = Vec::new();
@@ -269,9 +318,55 @@ fn drifted_ids(accounts: &Accounts<'_>) -> Vec<String> {
     findings
 }
 
-/// The stale check: the packages the lock file names that are not
-/// installed. The lock file recreates their accounts on every build, so a
-/// removed package's accounts would otherwise stay in the image.
+/// The paths under /usr and /etc owned by an ID that has no account, by ID.
+fn paths_without_account(
+    accounts: &Accounts<'_>,
+) -> Result<BTreeMap<Owner, BTreeSet<Utf8PathBuf>>> {
+    let mut paths: BTreeMap<Owner, BTreeSet<Utf8PathBuf>> = BTreeMap::new();
+    for dir in OWNED_DIRS {
+        let base = Utf8Path::new("/").join(dir);
+        let config = WalkConfiguration::default().path_base(base.as_std_path());
+        accounts
+            .root
+            .open_dir(dir)?
+            .as_cap_std()
+            .walk(&config, |e| -> Result<ControlFlow<()>> {
+                let meta = e.entry.metadata()?;
+                for owner in [Owner::Uid(meta.uid()), Owner::Gid(meta.gid())] {
+                    if accounts.resolves(owner) {
+                        continue;
+                    }
+                    let path = Utf8Path::from_path(e.path)
+                        .with_context(|| format!("{} is not UTF-8", e.path.display()))?;
+                    paths.entry(owner).or_default().insert(path.to_owned());
+                }
+                Ok(ControlFlow::Continue(()))
+            })
+            .with_context(|| format!("scanning {base}"))?;
+    }
+    Ok(paths)
+}
+
+/// Ownership check: the IDs that own a path under /usr and /etc but have
+/// no account. They are left over from a build stage or a removed package.
+fn unresolved_owners(accounts: &Accounts<'_>) -> Result<Vec<String>> {
+    let mut findings = Vec::new();
+    for (owner, paths) in paths_without_account(accounts)? {
+        let Some(path) = paths.first() else {
+            continue;
+        };
+        let account = owner.account();
+        findings.push(match paths.len() - 1 {
+            0 => format!("{owner} owns {path} but matches no {account}"),
+            more => format!("{owner} owns {path} and {more} more paths but matches no {account}"),
+        });
+    }
+    Ok(findings)
+}
+
+/// Stale check: The packages the lock file names that are not installed. The
+/// lock file recreates their accounts on every build, so a removed package's
+/// accounts would otherwise stay in the image.
 fn stale_packages(accounts: &Accounts<'_>) -> Result<Vec<String>> {
     let mut findings = Vec::new();
     for block in accounts.lock.iter().flat_map(|lock| &lock.blocks) {
@@ -304,7 +399,9 @@ fn run(checks: &[Check], accounts: &Accounts<'_>) -> Result<()> {
         for finding in findings {
             writeln!(report, "{}", finding.trim_end())?;
         }
-        writeln!(report, "help: {}", check.help(accounts))?;
+        if let Some(help) = check.help(accounts) {
+            writeln!(report, "help: {help}")?;
+        }
     }
     if failed > 0 {
         bail!("{failed} account checks failed\n{report}");
@@ -326,6 +423,7 @@ pub(super) fn check_accounts(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -
     let files = sysusers::read_all(root)?;
     let lock = LockFile::read(root, lock_path)?;
     let accounts = Accounts {
+        root,
         distro,
         lock_path,
         lock: lock.as_ref(),
@@ -340,11 +438,12 @@ pub(super) fn check_accounts(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -
 
 #[cfg(test)]
 mod tests {
+    use cap_std_ext::cap_tempfile::utf8::TempDir;
     use indoc::indoc;
 
     use super::*;
     use crate::sysusers::ConfigFile;
-    use crate::testutil::TestDistro;
+    use crate::testutil::{TestDistro, rootfs};
 
     const USERS: &str = indoc! {"
         root:x:0:0:root:/root:/bin/bash
@@ -363,9 +462,11 @@ mod tests {
         adm:x:4:tss,avahi,root
     "};
 
-    /// The test rootfs's /etc, the lock file parsed from `lock`, and one
-    /// more sysusers.d file with `entries`.
+    /// An empty rootfs with /usr and /etc, the accounts of the test /etc,
+    /// the lock file parsed from `lock`, and one more sysusers.d file with
+    /// `entries`.
     struct Fixture {
+        root: TempDir,
         distro: TestDistro,
         users: Vec<Passwd>,
         groups: Vec<passwd::Group>,
@@ -387,7 +488,12 @@ mod tests {
                 path: "usr/lib/sysusers.d/pkg.conf".into(),
                 entries: sysusers::parse(entries)?,
             });
+            let root = rootfs()?;
+            for dir in OWNED_DIRS {
+                root.create_dir(dir)?;
+            }
             Ok(Self {
+                root,
                 distro,
                 users: USERS.lines().map(str::parse).collect::<Result<_>>()?,
                 groups: GROUPS.lines().map(str::parse).collect::<Result<_>>()?,
@@ -398,6 +504,7 @@ mod tests {
 
         fn accounts(&self) -> Accounts<'_> {
             Accounts {
+                root: &self.root,
                 distro: &self.distro,
                 lock_path: Utf8Path::new("usr/lib/sysusers.d/00-bootc-imagectl.conf"),
                 lock: self.lock.as_ref(),
@@ -463,6 +570,34 @@ mod tests {
                 "user avahi has UID 900 but /usr/lib/sysusers.d/pkg.conf specifies 901",
             ]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn ownership_check_names_the_ids_without_an_account() -> Result<()> {
+        let fixture = Fixture::new(TestDistro::default(), None, "")?;
+        let root = &fixture.root;
+        root.create_dir_all("usr/lib/foo")?;
+        root.write("usr/lib/foo/bar", "")?;
+        root.write("etc/baz", "")?;
+        root.symlink("baz", "etc/link")?;
+
+        // The test cannot chown, so the paths are owned by whoever runs it.
+        let meta = root.metadata("etc/baz")?;
+        let mut expected = Vec::new();
+        if !USERS.contains(&format!(":x:{}:", meta.uid())) {
+            expected.push(format!(
+                "UID {} owns /etc/baz and 4 more paths but matches no user",
+                meta.uid()
+            ));
+        }
+        if !GROUPS.contains(&format!(":x:{}:", meta.gid())) {
+            expected.push(format!(
+                "GID {} owns /etc/baz and 4 more paths but matches no group",
+                meta.gid()
+            ));
+        }
+        assert_eq!(Check::Ownership.run(&fixture.accounts())?, expected);
         Ok(())
     }
 
