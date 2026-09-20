@@ -2,6 +2,7 @@
 
 use std::ffi::OsString;
 use std::path::Path;
+use std::process::Command;
 use std::sync::LazyLock;
 
 use anyhow::Result;
@@ -113,5 +114,32 @@ fn builds_initramfs() -> Result<()> {
     let initramfs = ROOT.metadata(format!("{modules}/initramfs.img"))?;
     assert!(initramfs.len() > 0);
     assert_eq!(initramfs.mode() & 0o7777, 0o600);
+    Ok(())
+}
+
+#[test]
+fn initramfs_resolves_users_through_nss_systemd() -> Result<()> {
+    let [kver] = names("usr/lib/modules")?.try_into().expect("one kernel");
+    let initramfs = format!("/usr/lib/modules/{}/initramfs.img", kver.display());
+    let output = Command::new("lsinitrd").arg(&initramfs).output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listing = String::from_utf8(output.stdout)?;
+    for path in [
+        "usr/lib/userdb/avahi.user",
+        "usr/lib/userdb/969.user",
+        "usr/lib/libnss_systemd.so.2",
+        "etc/nsswitch.conf",
+    ] {
+        assert!(
+            listing
+                .lines()
+                .any(|line| line.split_whitespace().any(|field| field == path)),
+            "{path} is not in {initramfs}"
+        );
+    }
     Ok(())
 }
