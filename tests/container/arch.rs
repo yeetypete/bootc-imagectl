@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use bootc_imagectl::passwd::{Entry, Passwd};
+use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 
 use crate::finalize::{ROOT, names};
@@ -66,5 +67,35 @@ fn writes_user_records_to_userdb() -> Result<()> {
         std::path::Path::new("avahi.user")
     );
     assert!(!ROOT.exists("usr/lib/userdb/root.user"));
+    Ok(())
+}
+
+#[test]
+fn writes_privileged_records_for_users_with_a_password() -> Result<()> {
+    let record = ROOT.read_to_string("usr/lib/userdb/archie.user-privileged")?;
+    assert!(
+        record.contains("\"hashedPassword\": [\n      \"$"),
+        "{record}"
+    );
+    assert_eq!(
+        ROOT.metadata("usr/lib/userdb/archie.user-privileged")?
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert_eq!(
+        ROOT.read_link("usr/lib/userdb/1000.user-privileged")?,
+        std::path::Path::new("archie.user-privileged")
+    );
+    assert!(
+        !ROOT
+            .read_to_string("usr/lib/userdb/archie.user")?
+            .contains("locked")
+    );
+    assert!(
+        ROOT.read_to_string("usr/lib/userdb/avahi.user")?
+            .contains("\"locked\": true")
+    );
+    assert!(!ROOT.exists("usr/lib/userdb/avahi.user-privileged"));
     Ok(())
 }

@@ -1,4 +1,20 @@
-//! Write the user records systemd-userdbd reads from /usr/lib/userdb.
+//! Write the user records nss-systemd reads from /usr/lib/userdb.
+//!
+//! The files of a user are named after the user and its UID:
+//!
+//! ```text
+//! alice.user                                 the record, mode 0644
+//! 1000.user -> alice.user                    for lookups by UID
+//! alice.user-privileged                      the password hash, mode 0600
+//! 1000.user-privileged -> alice.user-privileged
+//! ```
+//!
+//! The record holds the passwd(5) fields. The privileged file holds the
+//! password hash from shadow(5), which nss-systemd merges into the record
+//! when it may read the file. A user without a hash has no privileged file
+//! and is locked.
+
+use std::ops::Not;
 
 use anyhow::{Context, Result, bail};
 use cap_std_ext::cap_std::fs::{Permissions, PermissionsExt};
@@ -7,7 +23,7 @@ use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use serde::Serialize;
 
 use crate::login_defs::LoginDefs;
-use crate::passwd::{Passwd, non_empty};
+use crate::passwd::{Passwd, Shadow, non_empty};
 
 /// The drop-in directory under /usr, where the image ships its user
 /// records, relative to the rootfs.
@@ -36,7 +52,22 @@ impl Disposition {
     }
 }
 
-/// A user record, with the fields a passwd(5) entry provides.
+/// The privileged section of a user record: the fields only root may read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Privileged {
+    /// The crypt(3) hashes of the user's password.
+    pub hashed_password: Vec<String>,
+}
+
+/// The content of a privileged file.
+#[derive(Serialize)]
+struct PrivilegedRecord<'a> {
+    privileged: &'a Privileged,
+}
+
+/// A user record, with the fields a passwd(5) and a shadow(5) entry
+/// provide.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserRecord {
@@ -50,15 +81,26 @@ pub struct UserRecord {
     pub home_directory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
+    /// Whether the user cannot log in. Set when the user has no password.
+    #[serde(skip_serializing_if = "Not::not")]
+    pub locked: bool,
+    /// The privileged section, written to its own file.
+    #[serde(skip)]
+    pub privileged: Option<Privileged>,
 }
 
 impl UserRecord {
-    /// The record of a passwd entry.
+    /// The record of a passwd entry and its shadow entry, if it has one.
     ///
     /// # Errors
     ///
     /// Fails if the UID is in no range of login.defs.
-    pub fn from_passwd(user: &Passwd, defs: &LoginDefs) -> Result<Self> {
+    pub fn from_passwd(user: &Passwd, shadow: Option<&Shadow>, defs: &LoginDefs) -> Result<Self> {
+        let privileged = shadow
+            .and_then(|shadow| shadow.password.hash())
+            .map(|hash| Privileged {
+                hashed_password: vec![hash.to_owned()],
+            });
         Ok(Self {
             user_name: user.name.to_string(),
             disposition: Disposition::of(user.uid, defs)?,
@@ -67,28 +109,60 @@ impl UserRecord {
             real_name: non_empty(&user.gecos),
             home_directory: non_empty(user.home.as_str()),
             shell: non_empty(user.shell.as_str()),
+            locked: privileged.is_none(),
+            privileged,
         })
     }
 
-    /// Write the record to `<name>.user` in the drop-in directory, and
-    /// symlink `<UID>.user` to it for lookups by UID. Both files are
-    /// world-readable and replace those of an earlier build.
+    /// Write the record and, if there is one, the privileged section to the
+    /// drop-in directory, each with its symlink by UID. The files replace
+    /// those of an earlier build.
     ///
     /// # Errors
     ///
     /// Fails if a file cannot be written.
     pub fn write(&self, dir: &Dir) -> Result<()> {
-        let primary = format!("{}.user", self.user_name);
-        let by_uid = format!("{}.user", self.uid);
-        let mut json = serde_json::to_string_pretty(self)?;
-        json.push('\n');
-        dir.atomic_write_with_perms(&primary, json, Permissions::from_mode(0o644))
-            .with_context(|| format!("writing {primary}"))?;
-        dir.remove_file_optional(&by_uid)?;
-        dir.symlink(&primary, &by_uid)
-            .with_context(|| format!("linking {by_uid} to {primary}"))?;
+        let name = &self.user_name;
+        let uid = self.uid;
+        write_linked(
+            dir,
+            &format!("{name}.user"),
+            &format!("{uid}.user"),
+            self,
+            0o644,
+        )?;
+        let (primary, by_uid) = (
+            format!("{name}.user-privileged"),
+            format!("{uid}.user-privileged"),
+        );
+        if let Some(privileged) = &self.privileged {
+            let record = PrivilegedRecord { privileged };
+            write_linked(dir, &primary, &by_uid, &record, 0o600)?;
+        } else {
+            dir.remove_file_optional(&primary)?;
+            dir.remove_file_optional(&by_uid)?;
+        }
         Ok(())
     }
+}
+
+/// Write `record` as JSON to `primary` with `mode`, and symlink `by_uid` to
+/// it, replacing both.
+fn write_linked(
+    dir: &Dir,
+    primary: &str,
+    by_uid: &str,
+    record: &impl Serialize,
+    mode: u32,
+) -> Result<()> {
+    let mut json = serde_json::to_string_pretty(record)?;
+    json.push('\n');
+    dir.atomic_write_with_perms(primary, json, Permissions::from_mode(mode))
+        .with_context(|| format!("writing {primary}"))?;
+    dir.remove_file_optional(by_uid)?;
+    dir.symlink(primary, by_uid)
+        .with_context(|| format!("linking {by_uid} to {primary}"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -100,10 +174,11 @@ mod tests {
     use crate::testutil::rootfs;
 
     #[test]
-    fn takes_the_fields_from_passwd() -> Result<()> {
+    fn takes_the_fields_from_passwd_and_shadow() -> Result<()> {
         let defs = LoginDefs::default();
         let user: Passwd = "avahi:x:969:969:Avahi mDNS/DNS-SD daemon:/:/usr/bin/nologin".parse()?;
-        let record = UserRecord::from_passwd(&user, &defs)?;
+        let shadow: Shadow = "avahi:!*:20702:::::1:".parse()?;
+        let record = UserRecord::from_passwd(&user, Some(&shadow), &defs)?;
         assert_eq!(
             record,
             UserRecord {
@@ -114,19 +189,35 @@ mod tests {
                 real_name: Some("Avahi mDNS/DNS-SD daemon".into()),
                 home_directory: Some("/".into()),
                 shell: Some("/usr/bin/nologin".into()),
+                locked: true,
+                privileged: None,
             }
         );
 
         let user: Passwd = "alice:x:1000:1000:::".parse()?;
-        let record = UserRecord::from_passwd(&user, &defs)?;
+        let shadow: Shadow = "alice:$6$salt$hash:20702::::::".parse()?;
+        let record = UserRecord::from_passwd(&user, Some(&shadow), &defs)?;
         assert_eq!(record.disposition, Disposition::Regular);
         assert_eq!(
             (record.real_name, record.home_directory, record.shell),
             (None, None, None)
         );
+        assert!(!record.locked);
+        assert_eq!(
+            record.privileged,
+            Some(Privileged {
+                hashed_password: vec!["$6$salt$hash".into()],
+            })
+        );
+
+        // A user without a shadow entry has no password.
+        assert!(UserRecord::from_passwd(&user, None, &defs)?.locked);
 
         let user: Passwd = "x:x:65000:65000:::".parse()?;
-        let err = format!("{:#}", UserRecord::from_passwd(&user, &defs).unwrap_err());
+        let err = format!(
+            "{:#}",
+            UserRecord::from_passwd(&user, None, &defs).unwrap_err()
+        );
         assert_eq!(
             err,
             "UID 65000 is in neither the system nor the regular range of login.defs"
@@ -137,9 +228,10 @@ mod tests {
     #[test]
     fn writes_the_record_and_links_it_by_uid() -> Result<()> {
         let root = rootfs()?;
+        let defs = LoginDefs::default();
         let user: Passwd = "alice:x:1000:1000:Alice:/home/alice:/bin/sh".parse()?;
-        let record = UserRecord::from_passwd(&user, &LoginDefs::default())?;
-        record.write(&root)?;
+        let shadow: Shadow = "alice:$6$salt$hash:20702::::::".parse()?;
+        UserRecord::from_passwd(&user, Some(&shadow), &defs)?.write(&root)?;
         assert_eq!(
             root.read_to_string("alice.user")?,
             indoc! {r#"
@@ -156,12 +248,37 @@ mod tests {
         );
         assert_eq!(root.metadata("alice.user")?.mode() & 0o777, 0o644);
         assert_eq!(root.read_link("1000.user")?, "alice.user");
+        assert_eq!(
+            root.read_to_string("alice.user-privileged")?,
+            indoc! {r#"
+                {
+                  "privileged": {
+                    "hashedPassword": [
+                      "$6$salt$hash"
+                    ]
+                  }
+                }
+            "#}
+        );
+        assert_eq!(
+            root.metadata("alice.user-privileged")?.mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            root.read_link("1000.user-privileged")?,
+            "alice.user-privileged"
+        );
 
-        // A second write replaces both files.
+        // A second write replaces the files, and removes the privileged ones
+        // of a user who lost the password.
         let user: Passwd = "alice:x:1000:1000:Alice Smith:/home/alice:/bin/sh".parse()?;
-        UserRecord::from_passwd(&user, &LoginDefs::default())?.write(&root)?;
-        assert!(root.read_to_string("1000.user")?.contains("Alice Smith"));
+        UserRecord::from_passwd(&user, None, &defs)?.write(&root)?;
+        let record = root.read_to_string("1000.user")?;
+        assert!(record.contains("Alice Smith"), "{record}");
+        assert!(record.contains("\"locked\": true"), "{record}");
         assert_eq!(root.read_link("1000.user")?, "alice.user");
+        assert!(!root.exists("alice.user-privileged"));
+        assert!(!root.exists("1000.user-privileged"));
         Ok(())
     }
 }
