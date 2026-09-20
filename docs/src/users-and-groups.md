@@ -31,27 +31,27 @@ This creates the following problems:
 
 - UID/GID drift: A rebuild with a different package set allocates different UIDs
   and GIDs to the packages that were already installed.
-- A package removed from the image takes its files with it, but its user and
-  the group memberships it added stay in the system's `/etc`.
+- A package removed from the image takes its files with it, but its user
+  stays in the system's `/etc`.
 
 `bootc-imagectl finalize` addresses these problems as follows:
 
 - Every user and group is created with a fixed UID and GID from a sysusers
   lock file in the image, before any package is installed. The build fails if
   a package creates a user or group not present in sysusers.d.
-- Users are stored as user records under `/usr/lib/userdb`, and
-  memberships as membership files in the same directory. `/usr` is tracked
-  in the bootc image, so a user or membership removed from the image is
+- Users are stored as user records under `/usr/lib/userdb`, with a
+  membership file for each group they belong to, as nss-systemd requires.
+  `/usr` is tracked in the bootc image, so a user removed from the image is
   removed from the system on upgrade.
-- Groups stay in `/etc/group`, so an administrator or an installer can still
-  add users to them.
+- Groups and their member lists stay in `/etc/group`, where
+  `systemd-sysusers` maintains them at boot and an administrator or an
+  installer can still add users to them.
 
 ## Goals
 
 - A UID or GID published in an image never changes in later builds, whatever
   packages are added, removed or reordered.
-- A user or membership dropped from an image is gone from the system after an
-  upgrade.
+- A user dropped from an image is gone from the system after an upgrade.
 - The image author does not need to manually select UIDs or GIDs. On the
   first build, `bootc-imagectl finalize` reports the lines the sysusers lock
   file must contain.
@@ -183,21 +183,20 @@ It performs the following steps:
 4. Writes an empty `/usr/lib/userdb/<user>:<group>.membership` file for
    every user with a record and each group it belongs to.
 5. Removes the users with records from `/etc/passwd` and `/etc/shadow`, and
-   their names from the member lists in `/etc/group` and `/etc/gshadow`, and
-   checks that the users and their memberships still resolve through NSS.
-
-Groups keep their `/etc/group` entries. Only their members move.
+   checks that they and their memberships still resolve through NSS.
 
 ### Booted system
 
 - nss-systemd resolves the users from `/usr/lib/userdb`, by name and by UID,
-  their shadow entries from the privileged user records, and group membership
-  from the membership files. PAM verifies passwords through NSS. This requires
+  their shadow entries from the privileged user records, and their
+  memberships from the membership files, merged with the member lists of
+  `/etc/group`. PAM verifies passwords through NSS. This requires
   `systemd` in the `passwd`, `group` and `shadow` databases of
   `/etc/nsswitch.conf`, which Arch Linux, Debian and Fedora configure by
   default.
-- `systemd-sysusers.service` runs at boot, finds every user through NSS, and
-  creates any group missing from `/etc/group` with the specified GID.
+- `systemd-sysusers.service` runs at boot, finds every user through NSS,
+  creates any group missing from `/etc/group` with the specified GID, and
+  adds any missing member.
 - The initramfs contains a copy of `/usr/lib/userdb` and the nss-systemd
   module. This ensures that services that start before the root filesystem is
   mounted resolve the same users as the booted system.
@@ -206,11 +205,11 @@ Groups keep their `/etc/group` entries. Only their members move.
 
 | Change in the image | System after upgrade |
 | --- | --- |
-| Package added | Its record and membership files are part of the new `/usr`. `systemd-sysusers` creates its group at boot. |
-| Package removed, its lines are removed from the sysusers lock file | Its record and membership files are gone with `/usr`. Its group stays in `/etc/group`. |
+| Package added | Its record and membership files are part of the new `/usr`. `systemd-sysusers` creates its group and memberships in `/etc/group` at boot. |
+| Package removed, its lines are removed from the sysusers lock file | Its record and membership files are gone with `/usr`. Its group and member list stay in `/etc/group`. |
 | Package removed, its are lines kept in the sysusers lock file | The build fails the [stale entry check](#checks). No upgrade can occur. |
 | Packages reordered | No change. Every UID and GID is locked by the sysusers lock file. |
-| Switched to another image built from the same sysusers lock file | Same UIDs and GIDs. Records and memberships follow the new image. |
+| Switched to another image built from the same sysusers lock file | Same UIDs and GIDs. Records follow the new image. |
 | Rolled back to an earlier image | Same UIDs and GIDs. Files under `/var` keep their owners. |
 
 ## Checks
@@ -239,9 +238,9 @@ or `pacman`) whether the named package is installed.
 ## Limitations
 
 - The sysusers lock file is state that must be tracked and committed.
-- Groups are not removed from installed systems. `/etc/group` is persistent,
-  so a group the image drops remains on systems that have it, without its
-  configured members.
+- Groups and their members are not removed from installed systems.
+  `/etc/group` is persistent, so a group the image drops remains on systems
+  that have it, members included.
 - A base image must not contain users or groups created without the
   sysusers lock file. `systemd-sysusers` does not change the UID or GID of an
   existing account, so the lock file cannot fix them.
