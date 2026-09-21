@@ -3,13 +3,13 @@
 use std::process::Command;
 
 use anyhow::Result;
+use bootc_imagectl::command::CommandRunExt;
 
 #[test]
 fn boots_to_running() -> Result<()> {
-    let output = Command::new("systemctl")
+    let state = Command::new("systemctl")
         .arg("is-system-running")
-        .output()?;
-    let state = String::from_utf8(output.stdout)?;
+        .output_string()?;
     assert_eq!(state.trim(), "running");
     Ok(())
 }
