@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::LazyLock;
 
 use anyhow::Result;
-use bootc_imagectl::passwd::{Entry, Passwd};
+use bootc_imagectl::passwd::{Entry, Group, Passwd, Shadow};
 use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 
@@ -42,18 +42,41 @@ fn pacman_lists_packages_from_moved_database() -> Result<()> {
 }
 
 #[test]
-fn locks_uids_of_packages_users() -> Result<()> {
+fn locks_uids_of_packages_users() {
     assert!(ROOT.exists("usr/lib/sysusers.d/00-bootc-imagectl.conf"));
-    let root = Dir::from_cap_std(ROOT.try_clone()?);
-    let users = Passwd::read_all(&root)?;
-    let uid = |name: &str| {
-        users
-            .iter()
-            .find(|user| user.name.as_str() == name)
-            .map(|user| user.uid)
-    };
+    let uid = |name: &str| uzers::get_user_by_name(name).map(|user| user.uid());
     assert_eq!(uid("avahi"), Some(969));
     assert_eq!(uid("uuidd"), Some(970));
+}
+
+#[test]
+fn moves_users_out_of_etc_and_resolves_them_through_nss() -> Result<()> {
+    let root = Dir::from_cap_std(ROOT.try_clone()?);
+    let names = |users: &[Passwd]| -> Vec<String> {
+        users.iter().map(|user| user.name.to_string()).collect()
+    };
+    assert_eq!(names(&Passwd::read_all(&root)?), ["root", "nobody"]);
+    let shadow: Vec<String> = Shadow::read_all(&root)?
+        .iter()
+        .map(|entry| entry.name.to_string())
+        .collect();
+    assert_eq!(shadow, ["root", "nobody"]);
+    // Members stay in /etc/group, where systemd-sysusers maintains them.
+    let wheel = Group::read_all(&root)?
+        .into_iter()
+        .find(|group| group.name.as_str() == "wheel")
+        .expect("the wheel group");
+    assert_eq!(wheel.members.len(), 1, "{wheel}");
+    assert_eq!(wheel.members[0].as_str(), "archie", "{wheel}");
+
+    let archie = uzers::get_user_by_name("archie").expect("archie resolves through NSS");
+    assert_eq!(archie.uid(), 1000);
+    let groups: Vec<String> = uzers::get_user_groups("archie", archie.primary_group_id())
+        .expect("the groups of archie")
+        .iter()
+        .map(|group| group.name().to_string_lossy().into_owned())
+        .collect();
+    assert!(groups.contains(&"wheel".to_owned()), "{groups:?}");
     Ok(())
 }
 
