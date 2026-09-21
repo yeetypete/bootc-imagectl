@@ -12,6 +12,14 @@ pub trait CommandRunExt {
     ///
     /// Fails if the command cannot start or exits unsuccessfully.
     fn run(&mut self) -> Result<()>;
+
+    /// Run the command and return its standard output.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the command cannot start, exits unsuccessfully, or prints
+    /// something other than UTF-8. The error carries the standard error.
+    fn output_string(&mut self) -> Result<String>;
 }
 
 impl CommandRunExt for Command {
@@ -24,5 +32,20 @@ impl CommandRunExt for Command {
             bail!("{program} failed with {status}");
         }
         Ok(())
+    }
+
+    fn output_string(&mut self) -> Result<String> {
+        let program = self.get_program().display().to_string();
+        let output = self
+            .output()
+            .with_context(|| format!("running {program}"))?;
+        if !output.status.success() {
+            bail!(
+                "{program} failed with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim_end()
+            );
+        }
+        String::from_utf8(output.stdout).with_context(|| format!("the output of {program}"))
     }
 }
