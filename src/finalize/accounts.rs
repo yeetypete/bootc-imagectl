@@ -790,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn accounts_without_a_sysusers_file_get_a_blank_header() -> Result<()> {
+    fn accounts_without_sysusers_file_get_blank_header() -> Result<()> {
         let fixture = Fixture::new(TestDistro::default(), None, "u avahi -\n")?;
         let findings = Check::Lock.run(&fixture.accounts())?;
         assert!(
@@ -815,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn ownership_check_names_the_ids_without_an_account() -> Result<()> {
+    fn ownership_check_names_ids_without_account() -> Result<()> {
         let fixture = Fixture::new(TestDistro::default(), None, "")?;
         let root = &fixture.root;
         root.create_dir_all("usr/lib/foo")?;
@@ -892,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn passes_a_complete_lock_file() -> Result<()> {
+    fn passes_complete_lock_file() -> Result<()> {
         let fixture = Fixture::new(TestDistro::default(), Some(LOCK), "")?;
         run(&Check::BEFORE_MOVE, &fixture.accounts())
     }
@@ -933,7 +933,7 @@ mod tests {
     }
 
     #[test]
-    fn sysusers_check_names_the_entries_the_build_did_not_apply() -> Result<()> {
+    fn sysusers_check_names_unapplied_entries() -> Result<()> {
         let fixture = Fixture::new(TestDistro::default(), Some(LOCK), "")?;
         assert_eq!(
             Check::Sysusers.run(&fixture.accounts())?,

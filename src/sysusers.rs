@@ -554,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn names_malformed_file() -> Result<()> {
+    fn rejects_malformed_file_with_its_line() -> Result<()> {
         let root = rootfs()?;
         assert_eq!(read_all(&root)?, [], "no sysusers.d directory yet");
         root.create_dir_all("usr/lib/sysusers.d")?;

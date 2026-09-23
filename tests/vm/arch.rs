@@ -40,7 +40,7 @@ fn resolves_moved_users_through_nss() -> Result<()> {
 }
 
 #[test]
-fn accepts_the_password_of_a_moved_user() -> Result<()> {
+fn accepts_password_of_moved_user() -> Result<()> {
     // pam_unix verifies passwords through this helper, which reads a
     // NUL-terminated password from stdin.
     let verify = |password: &str| -> Result<bool> {

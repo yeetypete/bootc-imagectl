@@ -346,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_path_outside_usr_lib_sysusers_d() -> Result<()> {
+    fn rejects_path_outside_usr_lib_sysusers_d() -> Result<()> {
         let root = rootfs()?;
         for path in ["etc/sysusers.d/lock.conf", "usr/lib/sysusers.d/lock"] {
             let err = format!(

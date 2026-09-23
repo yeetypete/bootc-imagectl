@@ -306,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn escapes_paths_for_tmpfiles() {
+    fn escapes_paths() {
         assert_eq!(escape_path("/var/lib/plain"), "/var/lib/plain");
         assert_eq!(
             escape_path("/var/lib/with space\tand 'quotes' \"too\" 100%\\"),

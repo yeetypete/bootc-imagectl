@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_os_release_contents() -> Result<()> {
+    fn parses_contents() -> Result<()> {
         let release = parse(indoc! {r#"
             # comment
             NAME="Ubuntu"

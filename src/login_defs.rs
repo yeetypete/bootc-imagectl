@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_key_without_a_number() {
+    fn rejects_key_without_number() {
         let err = format!("{:#}", "UID_MIN\n".parse::<LoginDefs>().unwrap_err());
         assert!(
             err.starts_with("line 1: UID_MIN is \"\", not a UID"),
