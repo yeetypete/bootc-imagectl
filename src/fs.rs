@@ -59,7 +59,7 @@ mod tests {
     }
 
     #[test]
-    fn fails_on_symlink() -> Result<()> {
+    fn fails_on_symlink_in_tree() -> Result<()> {
         let root = rootfs()?;
         root.create_dir("from")?;
         root.symlink("top", "from/link")?;

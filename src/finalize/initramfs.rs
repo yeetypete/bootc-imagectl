@@ -85,7 +85,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_no_kernel_or_multiple() -> Result<()> {
+    fn rejects_missing_or_multiple_kernels() -> Result<()> {
         let root = rootfs()?;
         assert!(kernel_version(&root).is_err());
         root.create_dir_all(format!("{MODULES}/7.1.11-arch1-1"))?;

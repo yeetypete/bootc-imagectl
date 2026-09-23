@@ -537,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_a_file_and_keeps_its_mode() -> Result<()> {
+    fn writes_file_and_keeps_its_mode() -> Result<()> {
         use cap_std_ext::cap_std::fs::{Permissions, PermissionsExt};
 
         let root = rootfs()?;
@@ -558,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_a_file_and_names_the_malformed_line() -> Result<()> {
+    fn reads_file_and_names_malformed_line() -> Result<()> {
         let root = rootfs()?;
         root.create_dir("etc")?;
         root.write(

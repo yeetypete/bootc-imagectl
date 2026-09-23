@@ -42,7 +42,7 @@ fn pacman_lists_packages_from_moved_database() -> Result<()> {
 }
 
 #[test]
-fn locks_uids_of_packages_users() {
+fn locks_uids_of_package_users() {
     assert!(ROOT.exists("usr/lib/sysusers.d/00-bootc-imagectl.conf"));
     let uid = |name: &str| uzers::get_user_by_name(name).map(|user| user.uid());
     assert_eq!(uid("avahi"), Some(969));
@@ -94,7 +94,7 @@ fn writes_user_records_to_userdb() -> Result<()> {
 }
 
 #[test]
-fn writes_privileged_records_for_users_with_a_password() -> Result<()> {
+fn writes_privileged_records_for_users_with_passwords() -> Result<()> {
     let record = ROOT.read_to_string("usr/lib/userdb/archie.user-privileged")?;
     assert!(
         record.contains("\"hashedPassword\": [\n      \"$"),

@@ -188,7 +188,7 @@ mod tests {
     use crate::testutil::rootfs;
 
     #[test]
-    fn takes_the_fields_from_passwd_and_shadow() -> Result<()> {
+    fn takes_fields_from_passwd_and_shadow() -> Result<()> {
         let defs = LoginDefs::default();
         let user: Passwd = "avahi:x:969:969:Avahi mDNS/DNS-SD daemon:/:/usr/bin/nologin".parse()?;
         let shadow: Shadow = "avahi:!*:20702:::::1:".parse()?;
@@ -240,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_the_record_and_links_it_by_uid() -> Result<()> {
+    fn writes_record_and_links_it_by_uid() -> Result<()> {
         let root = rootfs()?;
         let defs = LoginDefs::default();
         let user: Passwd = "alice:x:1000:1000:Alice:/home/alice:/bin/sh".parse()?;
