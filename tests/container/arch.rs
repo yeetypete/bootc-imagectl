@@ -8,7 +8,7 @@ use bootc_imagectl::passwd::{Entry, Group, Passwd, Shadow};
 use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 
-use crate::finalize::{ROOT, names};
+use crate::finalize::{ROOT, initramfs_paths, names, var_tmpfiles};
 
 #[test]
 fn moves_pacman_database_and_removes_its_indexes() -> Result<()> {
@@ -132,5 +132,31 @@ fn writes_membership_files_for_primary_and_auxiliary_groups() -> Result<()> {
     assert!(ROOT.exists("usr/lib/userdb/archie:wheel.membership"));
     assert!(ROOT.exists("usr/lib/userdb/avahi:avahi.membership"));
     assert!(!ROOT.exists("usr/lib/userdb/root:root.membership"));
+    Ok(())
+}
+
+#[test]
+fn keeps_only_runtime_directories_in_var() -> Result<()> {
+    assert_eq!(names("var")?, ["lock", "run", "tmp"]);
+    Ok(())
+}
+
+#[test]
+fn records_mail_spool_in_var_tmpfiles() -> Result<()> {
+    let var = var_tmpfiles()?;
+    assert!(var.contains("L /var/mail - - - - spool/mail\n"), "{var}");
+    assert!(
+        var.contains("d /var/spool/mail 1777 root root -\n"),
+        "{var}"
+    );
+    Ok(())
+}
+
+#[test]
+fn initramfs_carries_user_records() -> Result<()> {
+    let paths = initramfs_paths()?;
+    for path in ["usr/lib/userdb/avahi.user", "usr/lib/userdb/969.user"] {
+        assert!(paths.iter().any(|found| found == path), "{path}");
+    }
     Ok(())
 }
