@@ -87,6 +87,7 @@ dependencies = [
  "cap-std-ext",
  "clap",
  "indoc",
+ "rustix",
  "serde",
  "serde_json",
  "tracing",
