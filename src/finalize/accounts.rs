@@ -14,7 +14,6 @@ use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::{CapStdExtDirExt, WalkConfiguration};
 use tracing::{debug, info};
 use uzers::cache::UsersCache;
-use uzers::os::unix::GroupExt;
 use uzers::{Groups, Users};
 
 use crate::distro::Distro;
@@ -31,18 +30,19 @@ const OWNED_DIRS: [&str; 2] = ["usr", "etc"];
 /// Account lookups through NSS.
 trait Nss {
     /// The UID of the user with the name.
-    fn uid_of(&self, name: &str) -> Option<u32>;
+    fn uid_of(&self, name: &Name) -> Option<u32>;
     /// The name of the user with the UID.
     fn name_of(&self, uid: u32) -> Option<String>;
     /// The GID of the group with the name.
-    fn gid_of(&self, group: &str) -> Option<u32>;
-    /// Whether the user is in the group's member list.
-    fn is_member(&self, user: &str, group: &str) -> bool;
+    fn gid_of(&self, group: &Name) -> Option<u32>;
+    /// The groups the user belongs to, as `getgrouplist` merges them from
+    /// every NSS source. `gid` is the user's primary group.
+    fn groups_of(&self, user: &Name, gid: u32) -> Option<Vec<String>>;
 }
 
-impl<T: Users + Groups> Nss for T {
-    fn uid_of(&self, name: &str) -> Option<u32> {
-        self.get_user_by_name(name).map(|user| user.uid())
+impl Nss for UsersCache {
+    fn uid_of(&self, name: &Name) -> Option<u32> {
+        self.get_user_by_name(name.as_str()).map(|user| user.uid())
     }
 
     fn name_of(&self, uid: u32) -> Option<String> {
@@ -50,13 +50,19 @@ impl<T: Users + Groups> Nss for T {
             .map(|user| user.name().to_string_lossy().into_owned())
     }
 
-    fn gid_of(&self, group: &str) -> Option<u32> {
-        self.get_group_by_name(group).map(|group| group.gid())
+    fn gid_of(&self, group: &Name) -> Option<u32> {
+        self.get_group_by_name(group.as_str())
+            .map(|group| group.gid())
     }
 
-    fn is_member(&self, user: &str, group: &str) -> bool {
-        self.get_group_by_name(group)
-            .is_some_and(|group| group.members().iter().any(|member| member == user))
+    fn groups_of(&self, user: &Name, gid: u32) -> Option<Vec<String>> {
+        let groups = uzers::get_user_groups(user.as_str(), gid)?;
+        Some(
+            groups
+                .iter()
+                .map(|group| group.name().to_string_lossy().into_owned())
+                .collect(),
+        )
     }
 }
 
@@ -87,10 +93,10 @@ impl Accounts<'_> {
         self.groups.iter().filter(|group| !is_intrinsic(group.gid))
     }
 
-    /// Every `(user, group)` pair of the users with records, through their
-    /// primary group or a member list in /etc/group.
-    fn memberships(&self) -> Result<BTreeSet<(&Name, &Name)>> {
-        let mut memberships = BTreeSet::new();
+    /// The groups each user with a record belongs to, through its primary
+    /// group or a member list in /etc/group.
+    fn memberships(&self) -> Result<BTreeMap<&Name, BTreeSet<&Name>>> {
+        let mut memberships: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
         for user in self.users_to_lock() {
             let primary = self
                 .groups
@@ -107,7 +113,10 @@ impl Accounts<'_> {
                 .iter()
                 .filter(|group| group.members.contains(&user.name));
             for group in iter::once(primary).chain(auxiliary) {
-                memberships.insert((&user.name, &group.name));
+                memberships
+                    .entry(&user.name)
+                    .or_default()
+                    .insert(&group.name);
             }
         }
         Ok(memberships)
@@ -461,23 +470,28 @@ fn stale_packages(accounts: &Accounts<'_>) -> Result<Vec<String>> {
 /// as /etc had them.
 fn unresolved_users(accounts: &Accounts<'_>) -> Result<Vec<String>> {
     let nss = accounts.nss;
+    let memberships = accounts.memberships()?;
     let mut findings = Vec::new();
     for user in accounts.users_to_lock() {
-        let (name, uid) = (user.name.as_str(), user.uid);
+        let (name, uid) = (&user.name, user.uid);
         match nss.uid_of(name) {
             Some(found) if found == uid => {}
             Some(found) => findings.push(format!("user {name} resolves to UID {found}, not {uid}")),
             None => findings.push(format!("user {name} does not resolve")),
         }
         match nss.name_of(uid) {
-            Some(found) if found == name => {}
+            Some(found) if found == name.as_str() => {}
             Some(found) => findings.push(format!("UID {uid} resolves to {found}, not {name}")),
             None => findings.push(format!("UID {uid} does not resolve")),
         }
-    }
-    for (user, group) in accounts.memberships()? {
-        if !nss.is_member(user.as_str(), group.as_str()) {
-            findings.push(format!("{user} does not resolve as a member of {group}"));
+        let Some(resolved) = nss.groups_of(name, user.gid) else {
+            findings.push(format!("the groups of {name} do not resolve"));
+            continue;
+        };
+        for group in memberships.get(&user.name).into_iter().flatten() {
+            if !resolved.iter().any(|found| found == group.as_str()) {
+                findings.push(format!("{name} does not resolve as a member of {group}"));
+            }
         }
     }
     Ok(findings)
@@ -490,12 +504,12 @@ fn unapplied_entries(accounts: &Accounts<'_>) -> Vec<String> {
     let (nss, index) = (accounts.nss, &accounts.index);
     let mut findings = Vec::new();
     for name in index.users.keys() {
-        if nss.uid_of(name.as_str()).is_none() {
+        if nss.uid_of(name).is_none() {
             findings.push(format!("systemd-sysusers would create the user {name}"));
         }
     }
     for name in index.groups.keys() {
-        if nss.gid_of(name.as_str()).is_none() {
+        if nss.gid_of(name).is_none() {
             findings.push(format!("systemd-sysusers would create the group {name}"));
         }
     }
@@ -604,12 +618,15 @@ fn write_user_records(accounts: &Accounts<'_>, defs: &LoginDefs) -> Result<()> {
 fn write_memberships(accounts: &Accounts<'_>) -> Result<()> {
     let dir = accounts.root.open_dir(userdb::DROPIN_DIR)?;
     let memberships = accounts.memberships()?;
-    for (user, group) in &memberships {
-        userdb::write_membership(&dir, user, group)?;
+    let mut written = 0;
+    for (user, groups) in &memberships {
+        for group in groups {
+            userdb::write_membership(&dir, user, group)?;
+            written += 1;
+        }
     }
     info!(
-        "wrote {} membership files to /{}",
-        memberships.len(),
+        "wrote {written} membership files to /{}",
         userdb::DROPIN_DIR
     );
     Ok(())
@@ -646,7 +663,8 @@ mod tests {
     use indoc::indoc;
 
     use uzers::mock::MockUsers;
-    use uzers::{Group, User};
+    use uzers::os::unix::GroupExt;
+    use uzers::{AllGroups, Group, User};
 
     use super::*;
     use crate::sysusers::ConfigFile;
@@ -685,13 +703,42 @@ mod tests {
         }
         for group in groups {
             let mut mock = Group::new(group.gid, group.name.as_str());
-            let primary = users.iter().filter(|user| user.gid == group.gid);
-            for member in primary.map(|user| &user.name).chain(&group.members) {
+            for member in &group.members {
                 mock = mock.add_member(member.as_str());
             }
             nss.add_group(mock);
         }
         nss
+    }
+
+    impl Nss for MockUsers {
+        fn uid_of(&self, name: &Name) -> Option<u32> {
+            self.get_user_by_name(name.as_str()).map(|user| user.uid())
+        }
+
+        fn name_of(&self, uid: u32) -> Option<String> {
+            self.get_user_by_uid(uid)
+                .map(|user| user.name().to_string_lossy().into_owned())
+        }
+
+        fn gid_of(&self, group: &Name) -> Option<u32> {
+            self.get_group_by_name(group.as_str())
+                .map(|group| group.gid())
+        }
+
+        /// The primary group and every group that lists the user, as
+        /// `getgrouplist` would collect them.
+        fn groups_of(&self, user: &Name, gid: u32) -> Option<Vec<String>> {
+            Some(
+                self.get_all_groups()
+                    .filter(|group| {
+                        group.gid() == gid
+                            || group.members().iter().any(|member| member == user.as_str())
+                    })
+                    .map(|group| group.name().to_string_lossy().into_owned())
+                    .collect(),
+            )
+        }
     }
 
     /// An empty rootfs with /usr and /etc, the accounts of the test /etc,
@@ -921,11 +968,11 @@ mod tests {
         assert_eq!(
             Check::Resolution.run(&fixture.accounts())?,
             [
+                "avahi does not resolve as a member of adm",
                 "user http resolves to UID 35, not 33",
                 "UID 33 does not resolve",
                 "user tss does not resolve",
                 "UID 971 does not resolve",
-                "avahi does not resolve as a member of adm",
                 "tss does not resolve as a member of tss",
             ]
         );

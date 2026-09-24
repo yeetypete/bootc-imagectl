@@ -43,55 +43,9 @@ impl Distro for Arch {
         "arch"
     }
 
-    /// Arch packages generate no distribution-specific per-machine state.
-    fn remove_machine_identity(&self, _root: &Dir) -> Result<()> {
-        Ok(())
-    }
-
-    /// Move pacman's database under /usr and point `DBPath` at it. A database
-    /// already outside /var is left where it is.
-    fn move_package_database(&self, root: &Dir) -> Result<()> {
-        let from = db_path(root)?;
-        if !Utf8Path::new(&from).starts_with("var") {
-            return Ok(());
-        }
-        root.create_dir_all("usr/lib/sysimage")?;
-        move_dir(root, &from, USR_DB_PATH)
-            .with_context(|| format!("moving /{from} to /{USR_DB_PATH}"))?;
-
-        // Replace the DBPath line, which pacman ships commented out.
-        let conf = root
-            .read_to_string("etc/pacman.conf")
-            .context("reading /etc/pacman.conf")?;
-        let db_path_line = format!("DBPath = /{USR_DB_PATH}/");
-        let mut lines: Vec<&str> = conf.lines().collect();
-        let is_db_path = |line: &&str| {
-            line.trim_start()
-                .trim_start_matches('#')
-                .trim_start()
-                .starts_with("DBPath")
-        };
-        let i = lines
-            .iter()
-            .position(is_db_path)
-            .context("/etc/pacman.conf has no DBPath line")?;
-        lines[i] = &db_path_line;
-        root.write("etc/pacman.conf", lines.join("\n") + "\n")
-            .context("writing /etc/pacman.conf")
-    }
-
-    /// Remove pacman repository indexes. The local database is not removed.
-    fn remove_repository_indexes(&self, root: &Dir) -> Result<()> {
-        let sync = format!("{}/sync", db_path(root)?);
-        let Some(dir) = root.open_dir_optional(&sync)? else {
-            return Ok(());
-        };
-        for entry in dir.entries()? {
-            let name = entry?.file_name()?;
-            dir.remove_all_optional(&name)
-                .with_context(|| format!("removing /{sync}/{name}"))?;
-        }
-        Ok(())
+    fn relocate_package_state(&self, root: &Dir) -> Result<()> {
+        move_database(root)?;
+        remove_indexes(root)
     }
 
     fn package_owning(&self, path: &Utf8Path) -> Result<Option<String>> {
@@ -102,6 +56,52 @@ impl Distro for Arch {
     fn is_installed(&self, name: &str) -> Result<bool> {
         Ok(query(&["-Q", name], "was not found")?.is_some())
     }
+}
+
+/// Move pacman's database under /usr and point `DBPath` at it. A database
+/// already outside /var is left where it is.
+fn move_database(root: &Dir) -> Result<()> {
+    let from = db_path(root)?;
+    if !Utf8Path::new(&from).starts_with("var") {
+        return Ok(());
+    }
+    root.create_dir_all("usr/lib/sysimage")?;
+    move_dir(root, &from, USR_DB_PATH)
+        .with_context(|| format!("moving /{from} to /{USR_DB_PATH}"))?;
+
+    // Replace the DBPath line, which pacman ships commented out.
+    let conf = root
+        .read_to_string("etc/pacman.conf")
+        .context("reading /etc/pacman.conf")?;
+    let db_path_line = format!("DBPath = /{USR_DB_PATH}/");
+    let mut lines: Vec<&str> = conf.lines().collect();
+    let is_db_path = |line: &&str| {
+        line.trim_start()
+            .trim_start_matches('#')
+            .trim_start()
+            .starts_with("DBPath")
+    };
+    let i = lines
+        .iter()
+        .position(is_db_path)
+        .context("/etc/pacman.conf has no DBPath line")?;
+    lines[i] = &db_path_line;
+    root.write("etc/pacman.conf", lines.join("\n") + "\n")
+        .context("writing /etc/pacman.conf")
+}
+
+/// Remove pacman's repository indexes. The local database is not removed.
+fn remove_indexes(root: &Dir) -> Result<()> {
+    let sync = format!("{}/sync", db_path(root)?);
+    let Some(dir) = root.open_dir_optional(&sync)? else {
+        return Ok(());
+    };
+    for entry in dir.entries()? {
+        let name = entry?.file_name()?;
+        dir.remove_all_optional(&name)
+            .with_context(|| format!("removing /{sync}/{name}"))?;
+    }
+    Ok(())
 }
 
 /// Query the local pacman database. Returns pacman's output, or `None` if
@@ -180,7 +180,7 @@ mod tests {
         )?;
         root.write("var/lib/pacman/sync/core.db", b"index")?;
 
-        Arch.move_package_database(&root)?;
+        move_database(&root)?;
 
         assert!(!root.exists("var/lib/pacman"));
         assert!(root.exists("usr/lib/sysimage/pacman/local/ALPM_DB_VERSION"));
@@ -209,7 +209,7 @@ mod tests {
         root.write("etc/pacman.conf", conf)?;
         root.create_dir_all("usr/lib/pacman/local")?;
 
-        Arch.move_package_database(&root)?;
+        move_database(&root)?;
 
         assert!(root.exists("usr/lib/pacman/local"));
         assert_eq!(root.read_to_string("etc/pacman.conf")?, conf);
@@ -227,7 +227,7 @@ mod tests {
                 #DBPath      = /var/lib/pacman/
             "},
         )?;
-        let err = format!("{:#}", Arch.move_package_database(&root).unwrap_err());
+        let err = format!("{:#}", move_database(&root).unwrap_err());
         assert!(err.contains("moving /var/lib/pacman"), "{err}");
         Ok(())
     }
@@ -248,7 +248,7 @@ mod tests {
             "},
         )?;
 
-        Arch.remove_repository_indexes(&root)?;
+        remove_indexes(&root)?;
 
         assert!(root.is_dir("var/lib/pacman/sync"));
         assert_eq!(root.read_dir("var/lib/pacman/sync")?.count(), 0);
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn tolerates_missing_sync_directory() -> Result<()> {
         let root = rootfs()?;
-        Arch.remove_repository_indexes(&root)?;
+        remove_indexes(&root)?;
         Ok(())
     }
 }
