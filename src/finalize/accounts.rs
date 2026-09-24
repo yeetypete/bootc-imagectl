@@ -30,19 +30,19 @@ const OWNED_DIRS: [&str; 2] = ["usr", "etc"];
 /// Account lookups through NSS.
 trait Nss {
     /// The UID of the user with the name.
-    fn uid_of(&self, name: &str) -> Option<u32>;
+    fn uid_of(&self, name: &Name) -> Option<u32>;
     /// The name of the user with the UID.
     fn name_of(&self, uid: u32) -> Option<String>;
     /// The GID of the group with the name.
-    fn gid_of(&self, group: &str) -> Option<u32>;
-    /// The names of the groups login puts the user with the primary GID
-    /// `gid` in, as `getgrouplist` collects them from every NSS source.
-    fn groups_of(&self, user: &str, gid: u32) -> Option<Vec<String>>;
+    fn gid_of(&self, group: &Name) -> Option<u32>;
+    /// The groups the user belongs to, as `getgrouplist` merges them from
+    /// every NSS source. `gid` is the user's primary group.
+    fn groups_of(&self, user: &Name, gid: u32) -> Option<Vec<String>>;
 }
 
 impl Nss for UsersCache {
-    fn uid_of(&self, name: &str) -> Option<u32> {
-        self.get_user_by_name(name).map(|user| user.uid())
+    fn uid_of(&self, name: &Name) -> Option<u32> {
+        self.get_user_by_name(name.as_str()).map(|user| user.uid())
     }
 
     fn name_of(&self, uid: u32) -> Option<String> {
@@ -50,12 +50,13 @@ impl Nss for UsersCache {
             .map(|user| user.name().to_string_lossy().into_owned())
     }
 
-    fn gid_of(&self, group: &str) -> Option<u32> {
-        self.get_group_by_name(group).map(|group| group.gid())
+    fn gid_of(&self, group: &Name) -> Option<u32> {
+        self.get_group_by_name(group.as_str())
+            .map(|group| group.gid())
     }
 
-    fn groups_of(&self, user: &str, gid: u32) -> Option<Vec<String>> {
-        let groups = uzers::get_user_groups(user, gid)?;
+    fn groups_of(&self, user: &Name, gid: u32) -> Option<Vec<String>> {
+        let groups = uzers::get_user_groups(user.as_str(), gid)?;
         Some(
             groups
                 .iter()
@@ -472,14 +473,14 @@ fn unresolved_users(accounts: &Accounts<'_>) -> Result<Vec<String>> {
     let memberships = accounts.memberships()?;
     let mut findings = Vec::new();
     for user in accounts.users_to_lock() {
-        let (name, uid) = (user.name.as_str(), user.uid);
+        let (name, uid) = (&user.name, user.uid);
         match nss.uid_of(name) {
             Some(found) if found == uid => {}
             Some(found) => findings.push(format!("user {name} resolves to UID {found}, not {uid}")),
             None => findings.push(format!("user {name} does not resolve")),
         }
         match nss.name_of(uid) {
-            Some(found) if found == name => {}
+            Some(found) if found == name.as_str() => {}
             Some(found) => findings.push(format!("UID {uid} resolves to {found}, not {name}")),
             None => findings.push(format!("UID {uid} does not resolve")),
         }
@@ -503,12 +504,12 @@ fn unapplied_entries(accounts: &Accounts<'_>) -> Vec<String> {
     let (nss, index) = (accounts.nss, &accounts.index);
     let mut findings = Vec::new();
     for name in index.users.keys() {
-        if nss.uid_of(name.as_str()).is_none() {
+        if nss.uid_of(name).is_none() {
             findings.push(format!("systemd-sysusers would create the user {name}"));
         }
     }
     for name in index.groups.keys() {
-        if nss.gid_of(name.as_str()).is_none() {
+        if nss.gid_of(name).is_none() {
             findings.push(format!("systemd-sysusers would create the group {name}"));
         }
     }
@@ -711,8 +712,8 @@ mod tests {
     }
 
     impl Nss for MockUsers {
-        fn uid_of(&self, name: &str) -> Option<u32> {
-            self.get_user_by_name(name).map(|user| user.uid())
+        fn uid_of(&self, name: &Name) -> Option<u32> {
+            self.get_user_by_name(name.as_str()).map(|user| user.uid())
         }
 
         fn name_of(&self, uid: u32) -> Option<String> {
@@ -720,17 +721,19 @@ mod tests {
                 .map(|user| user.name().to_string_lossy().into_owned())
         }
 
-        fn gid_of(&self, group: &str) -> Option<u32> {
-            self.get_group_by_name(group).map(|group| group.gid())
+        fn gid_of(&self, group: &Name) -> Option<u32> {
+            self.get_group_by_name(group.as_str())
+                .map(|group| group.gid())
         }
 
         /// The primary group and every group that lists the user, as
         /// `getgrouplist` would collect them.
-        fn groups_of(&self, user: &str, gid: u32) -> Option<Vec<String>> {
+        fn groups_of(&self, user: &Name, gid: u32) -> Option<Vec<String>> {
             Some(
                 self.get_all_groups()
                     .filter(|group| {
-                        group.gid() == gid || group.members().iter().any(|member| member == user)
+                        group.gid() == gid
+                            || group.members().iter().any(|member| member == user.as_str())
                     })
                     .map(|group| group.name().to_string_lossy().into_owned())
                     .collect(),
