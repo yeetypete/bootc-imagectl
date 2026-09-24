@@ -11,9 +11,10 @@ use anyhow::{Context, Result};
 use cap_std_ext::cap_std::fs_utf8::{Dir, MetadataExt, Permissions, PermissionsExt};
 use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8, WalkConfiguration};
 use tracing::{debug, info};
-use uzers::{Groups, Users};
+use uzers::{Groups, Users, UsersCache};
 
 use super::tmpfiles::{self, Entry};
+use crate::distro::Distro;
 
 /// Each run writes a new `bootc-imagectl-var-N.conf` and leaves earlier
 /// ones alone. Derived images which run `bootc-imagectl finalize` again would
@@ -59,8 +60,18 @@ fn record(entries: &mut BTreeMap<String, String>, declared: &HashSet<String>, en
     }
 }
 
+/// Move the package state out of /var, record what /var must contain at
+/// boot, and empty it.
+pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
+    distro
+        .relocate_package_state(root)
+        .context("relocating the package state")?;
+    write_var_tmpfiles(root, &UsersCache::new()).context("generating /var tmpfiles.d entries")?;
+    empty_var(root).context("emptying /var")
+}
+
 /// Write a tmpfiles.d file for directories and symlinks in /var.
-pub(super) fn write_var_tmpfiles(root: &Dir, db: &(impl Users + Groups)) -> Result<()> {
+fn write_var_tmpfiles(root: &Dir, db: &(impl Users + Groups)) -> Result<()> {
     debug!("generating /var tmpfiles.d entries");
     let declared = tmpfiles::declared_paths(root)?;
     let mut entries = BTreeMap::new();
@@ -131,7 +142,7 @@ pub(super) fn write_var_tmpfiles(root: &Dir, db: &(impl Users + Groups)) -> Resu
 }
 
 /// Empty /var, /run and /tmp. tmpfiles.d recreates their contents at boot.
-pub(super) fn empty_var(root: &Dir) -> Result<()> {
+fn empty_var(root: &Dir) -> Result<()> {
     debug!("emptying /var, /run and /tmp");
     for dir in ["run", "tmp"] {
         let Some(entries) = root.open_dir_optional(dir)? else {

@@ -15,28 +15,25 @@ pub trait Distro: std::fmt::Debug {
     fn name(&self) -> &'static str;
 
     /// Delete the machine identity this distribution's packages generate at
-    /// build time.
+    /// build time. Distributions whose packages generate none need no
+    /// implementation.
     ///
     /// # Errors
     ///
     /// Fails on any filesystem error in the rootfs.
-    fn remove_machine_identity(&self, root: &Dir) -> Result<()>;
+    fn remove_machine_identity(&self, _root: &Dir) -> Result<()> {
+        Ok(())
+    }
 
-    /// Move the database of installed packages out of /var, which finalize
-    /// empties, to where the package manager finds it on the installed system.
+    /// Move the state describing the installed packages out of /var, which
+    /// finalize empties, to where the package manager finds it on the
+    /// installed system, and delete the repository indexes the build
+    /// downloaded.
     ///
     /// # Errors
     ///
-    /// Fails if the database is missing or cannot be moved.
-    fn move_package_database(&self, root: &Dir) -> Result<()>;
-
-    /// Delete the repository indexes the package manager downloaded during
-    /// the build. The database of installed packages is not removed.
-    ///
-    /// # Errors
-    ///
-    /// Fails on any filesystem error in the rootfs.
-    fn remove_repository_indexes(&self, root: &Dir) -> Result<()>;
+    /// Fails if the state is missing or cannot be moved.
+    fn relocate_package_state(&self, root: &Dir) -> Result<()>;
 
     /// The name of the installed package that owns `path`, an absolute path
     /// in the image, or `None` if no package does.

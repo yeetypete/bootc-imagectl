@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use tracing::info;
-use uzers::UsersCache;
 
 use crate::cli::FinalizeOpts;
 use crate::distro;
@@ -35,20 +34,10 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     info!("finalizing a {} rootfs", distro.name());
 
     accounts::finalize(&root, distro, &opts.sysusers_lock).context("finalizing the accounts")?;
-    initramfs::build_initramfs(&root).context("building the initramfs")?;
-    identity::remove_machine_identity(&root, distro).context("removing machine identity")?;
-
-    distro
-        .move_package_database(&root)
-        .context("moving the package database")?;
-    distro
-        .remove_repository_indexes(&root)
-        .context("removing repository indexes")?;
-    layout::layout_toplevel(&root).context("laying out the toplevel")?;
-    tmpfiles::patch_tmpfiles(&root).context("patching tmpfiles.d")?;
-    var::write_var_tmpfiles(&root, &UsersCache::new())
-        .context("generating /var tmpfiles.d entries")?;
-    var::empty_var(&root).context("emptying /var")?;
+    initramfs::finalize(&root).context("building the initramfs")?;
+    identity::finalize(&root, distro).context("removing the machine identity")?;
+    layout::finalize(&root).context("laying out the filesystem")?;
+    var::finalize(&root, distro).context("finalizing /var")?;
 
     lint::bootc_lint()
 }

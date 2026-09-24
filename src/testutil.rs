@@ -28,15 +28,7 @@ impl Distro for TestDistro {
         "test"
     }
 
-    fn remove_machine_identity(&self, _root: &Dir) -> Result<()> {
-        Ok(())
-    }
-
-    fn move_package_database(&self, _root: &Dir) -> Result<()> {
-        Ok(())
-    }
-
-    fn remove_repository_indexes(&self, _root: &Dir) -> Result<()> {
+    fn relocate_package_state(&self, _root: &Dir) -> Result<()> {
         Ok(())
     }
 

@@ -37,7 +37,7 @@ fn kernel_version(root: &Dir) -> Result<String> {
 }
 
 /// Build the initramfs.
-pub(super) fn build_initramfs(root: &Dir) -> Result<()> {
+pub(super) fn finalize(root: &Dir) -> Result<()> {
     let kver = kernel_version(root)?;
     debug!("building the initramfs for {kver}");
     let moddir = format!("{MODULES}/{kver}");
