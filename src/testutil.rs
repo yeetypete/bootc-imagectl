@@ -7,10 +7,19 @@ use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::cap_tempfile::utf8::TempDir;
 
 use crate::distro::Distro;
+use crate::id::{Gid, Uid};
 
 /// An empty rootfs in a temporary directory.
 pub(crate) fn rootfs() -> Result<TempDir> {
     Ok(TempDir::new(ambient_authority())?)
+}
+
+pub(crate) fn uid(raw: u32) -> Uid {
+    Uid::new(raw).expect("a valid UID")
+}
+
+pub(crate) fn gid(raw: u32) -> Gid {
+    Gid::new(raw).expect("a valid GID")
 }
 
 /// A distribution whose packages generate no machine identity files, and

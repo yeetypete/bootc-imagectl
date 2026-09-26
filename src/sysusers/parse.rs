@@ -6,16 +6,17 @@ use std::str::FromStr;
 use anyhow::{Context, Result, bail, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 
-use super::{Entry, Group, Id, Kind, Membership, Name, PrimaryGroup, User, parse_id, word};
+use super::{Entry, Group, IdSource, Kind, Membership, Name, PrimaryGroup, User, word};
+use crate::id::{self, Uid};
 
 /// type, name, ID, GECOS, home directory, shell.
 const MAX_FIELDS: usize = 6;
 
 /// Parse the ID field of a `u` line: `UID`, `UID:GID`, `UID:groupname` or a
 /// path, with `-` for an automatic UID.
-fn parse_user_id(field: Option<&str>) -> Result<(Id, Option<PrimaryGroup>)> {
+fn parse_user_id(field: Option<&str>) -> Result<(IdSource<Uid>, Option<PrimaryGroup>)> {
     let Some(field) = field else {
-        return Ok((Id::Automatic, None));
+        return Ok((IdSource::Automatic, None));
     };
     if field.starts_with('/') {
         return Ok((field.parse()?, None));
@@ -149,7 +150,7 @@ impl Group {
         fields.ensure_user_fields_unset()?;
         Ok(Self {
             name: fields.name()?,
-            gid: fields.id.map_or(Ok(Id::Automatic), str::parse)?,
+            gid: fields.id.map_or(Ok(IdSource::Automatic), str::parse)?,
         })
     }
 }
@@ -172,7 +173,7 @@ fn parse_range(fields: &Fields<'_>) -> Result<RangeInclusive<u32>> {
     }
     let field = fields.id.context("missing range")?;
     let (first, last) = field.split_once('-').unwrap_or((field, field));
-    let (first, last) = (parse_id(first)?, parse_id(last)?);
+    let (first, last) = (id::parse(first)?, id::parse(last)?);
     ensure!(first <= last, "{field:?} is not a range");
     Ok(first..=last)
 }
@@ -202,6 +203,7 @@ mod tests {
 
     use super::*;
     use crate::sysusers::parse;
+    use crate::testutil::{gid, uid};
 
     fn name(name: &str) -> Name {
         Name(name.into())
@@ -210,7 +212,7 @@ mod tests {
     fn user(name: &str) -> User {
         User {
             name: Name(name.into()),
-            uid: Id::Automatic,
+            uid: IdSource::Automatic,
             primary_group: None,
             gecos: None,
             home: None,
@@ -245,13 +247,13 @@ mod tests {
             entries,
             [
                 Entry::User(User {
-                    uid: Id::Fixed(404),
+                    uid: IdSource::Fixed(uid(404)),
                     gecos: Some("HTTP User".into()),
                     locked: true,
                     ..user("httpd")
                 }),
                 Entry::User(User {
-                    uid: Id::FromPath("/usr/bin/authd".into()),
+                    uid: IdSource::FromPath("/usr/bin/authd".into()),
                     gecos: Some("Authorization user".into()),
                     ..user("_authd")
                 }),
@@ -263,14 +265,14 @@ mod tests {
                 }),
                 Entry::Group(Group {
                     name: name("input"),
-                    gid: Id::Automatic,
+                    gid: IdSource::Automatic,
                 }),
                 Entry::Membership(Membership {
                     user: name("_authd"),
                     group: name("input"),
                 }),
                 Entry::User(User {
-                    uid: Id::Fixed(0),
+                    uid: IdSource::Fixed(uid(0)),
                     gecos: Some("Superuser".into()),
                     home: Some("/root".into()),
                     shell: Some("/bin/zsh".into()),
@@ -288,15 +290,15 @@ mod tests {
             (
                 "u a 10:20",
                 Entry::User(User {
-                    uid: Id::Fixed(10),
-                    primary_group: Some(PrimaryGroup::Gid(20)),
+                    uid: IdSource::Fixed(uid(10)),
+                    primary_group: Some(PrimaryGroup::Gid(gid(20))),
                     ..user("a")
                 }),
             ),
             (
                 "u b 10:wheel",
                 Entry::User(User {
-                    uid: Id::Fixed(10),
+                    uid: IdSource::Fixed(uid(10)),
                     primary_group: Some(PrimaryGroup::Name(name("wheel"))),
                     ..user("b")
                 }),
@@ -312,14 +314,14 @@ mod tests {
                 "g x 5",
                 Entry::Group(Group {
                     name: name("x"),
-                    gid: Id::Fixed(5),
+                    gid: IdSource::Fixed(gid(5)),
                 }),
             ),
             (
                 "g y /usr/bin/x",
                 Entry::Group(Group {
                     name: name("y"),
-                    gid: Id::FromPath("/usr/bin/x".into()),
+                    gid: IdSource::FromPath("/usr/bin/x".into()),
                 }),
             ),
             ("r - 700", Entry::Range(700..=700)),

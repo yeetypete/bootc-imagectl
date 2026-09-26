@@ -29,6 +29,8 @@ use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 
 use word::WHITESPACE;
 
+use crate::id::{Gid, Uid};
+
 mod index;
 pub(crate) mod lockfile;
 mod parse;
@@ -48,10 +50,6 @@ const CONFIG_DIRS: &[&str] = &[
 
 /// The longest user or group name systemd accepts.
 const MAX_NAME_LEN: usize = 31;
-
-/// IDs with a special meaning that systemd refuses to allocate: the 16-bit
-/// and 32-bit `(uid_t) -1`.
-const PLACEHOLDER_IDS: [u32; 2] = [65535, u32::MAX];
 
 /// A user or group name systemd accepts: a letter or `_` followed by
 /// letters, digits, `_` and `-`, at most 31 characters.
@@ -92,19 +90,19 @@ impl fmt::Display for Name {
     }
 }
 
-/// The ID field of a `u` or `g` line.
+/// Where the UID or GID in the ID field of a `u` or `g` line comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Id {
+pub enum IdSource<T> {
     /// `-`: systemd-sysusers allocates a free ID when it creates the account.
     Automatic,
-    /// A fixed UID or GID.
-    Fixed(u32),
+    /// A fixed ID.
+    Fixed(T),
     /// An absolute path. The account takes the UID or GID of the path's
     /// owner or group.
     FromPath(Utf8PathBuf),
 }
 
-impl fmt::Display for Id {
+impl<T: fmt::Display> fmt::Display for IdSource<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Automatic => f.write_str("-"),
@@ -114,14 +112,14 @@ impl fmt::Display for Id {
     }
 }
 
-impl FromStr for Id {
+impl<T: FromStr<Err = anyhow::Error>> FromStr for IdSource<T> {
     type Err = anyhow::Error;
 
     fn from_str(field: &str) -> Result<Self> {
         Ok(match field {
             "-" => Self::Automatic,
             path if path.starts_with('/') => Self::FromPath(path.into()),
-            id => Self::Fixed(parse_id(id)?),
+            id => Self::Fixed(id.parse()?),
         })
     }
 }
@@ -130,7 +128,7 @@ impl FromStr for Id {
 /// of the ID field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimaryGroup {
-    Gid(u32),
+    Gid(Gid),
     Name(Name),
 }
 
@@ -151,7 +149,8 @@ impl FromStr for PrimaryGroup {
             Ok(name) => Self::Name(name),
             // A name never starts with a digit.
             Err(_) => Self::Gid(
-                parse_id(group)
+                group
+                    .parse()
                     .with_context(|| format!("{group:?} is neither a GID nor a group name"))?,
             ),
         })
@@ -163,7 +162,7 @@ impl FromStr for PrimaryGroup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
     pub name: Name,
-    pub uid: Id,
+    pub uid: IdSource<Uid>,
     /// The primary group. `None` means the group with the user's name.
     pub primary_group: Option<PrimaryGroup>,
     /// The GECOS field, a short description of the account.
@@ -183,7 +182,11 @@ impl User {
     pub fn implicit_group(&self) -> Option<Group> {
         self.primary_group.is_none().then(|| Group {
             name: self.name.clone(),
-            gid: self.uid.clone(),
+            gid: match &self.uid {
+                IdSource::Automatic => IdSource::Automatic,
+                IdSource::Fixed(uid) => IdSource::Fixed(uid.matching_gid()),
+                IdSource::FromPath(path) => IdSource::FromPath(path.clone()),
+            },
         })
     }
 }
@@ -192,7 +195,7 @@ impl User {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Group {
     pub name: Name,
-    pub gid: Id,
+    pub gid: IdSource<Gid>,
 }
 
 /// An `m` line: `user` is a member of `group`.
@@ -338,21 +341,6 @@ pub struct ConfigFile {
     /// The path relative to the rootfs, e.g. `usr/lib/sysusers.d/basic.conf`.
     pub path: Utf8PathBuf,
     pub entries: Vec<Entry>,
-}
-
-/// Parse a UID or GID.
-pub(crate) fn parse_id(field: &str) -> Result<u32> {
-    let is_plain_decimal =
-        field.bytes().all(|b| b.is_ascii_digit()) && (field == "0" || !field.starts_with('0'));
-    let id: u32 = is_plain_decimal
-        .then(|| field.parse().ok())
-        .flatten()
-        .with_context(|| format!("{field:?} is not a UID or GID"))?;
-    ensure!(
-        !PLACEHOLDER_IDS.contains(&id),
-        "{id} is not a valid UID or GID"
-    );
-    Ok(id)
 }
 
 /// The non-empty lines of a file, trimmed and numbered from 1. Comments
@@ -525,7 +513,7 @@ mod tests {
             files[3].entries,
             [Entry::Group(Group {
                 name: name("admin"),
-                gid: Id::Automatic,
+                gid: IdSource::Automatic,
             })],
             "the file in etc hides the one in usr/lib"
         );

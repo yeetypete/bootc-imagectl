@@ -24,6 +24,7 @@ use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use serde::Serialize;
 
+use crate::id::{Gid, Uid};
 use crate::login_defs::LoginDefs;
 use crate::passwd::{Passwd, Shadow, non_empty};
 use crate::sysusers::Name;
@@ -44,7 +45,7 @@ pub enum Disposition {
 
 impl Disposition {
     /// The disposition of a UID by the login.defs ranges.
-    fn of(uid: u32, defs: &LoginDefs) -> Result<Self> {
+    fn of(uid: Uid, defs: &LoginDefs) -> Result<Self> {
         if defs.is_system(uid) {
             Ok(Self::System)
         } else if defs.is_regular(uid) {
@@ -76,8 +77,8 @@ struct PrivilegedRecord<'a> {
 pub struct UserRecord {
     pub user_name: String,
     pub disposition: Disposition,
-    pub uid: u32,
-    pub gid: u32,
+    pub uid: Uid,
+    pub gid: Gid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub real_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,7 +186,7 @@ mod tests {
     use indoc::indoc;
 
     use super::*;
-    use crate::testutil::rootfs;
+    use crate::testutil::{gid, rootfs, uid};
 
     #[test]
     fn takes_fields_from_passwd_and_shadow() -> Result<()> {
@@ -198,8 +199,8 @@ mod tests {
             UserRecord {
                 user_name: "avahi".into(),
                 disposition: Disposition::System,
-                uid: 969,
-                gid: 969,
+                uid: uid(969),
+                gid: gid(969),
                 real_name: Some("Avahi mDNS/DNS-SD daemon".into()),
                 home_directory: Some("/".into()),
                 shell: Some("/usr/bin/nologin".into()),

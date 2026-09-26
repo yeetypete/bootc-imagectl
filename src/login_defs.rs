@@ -7,6 +7,8 @@ use anyhow::{Context, Result, ensure};
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExt;
 
+use crate::id::Uid;
+
 /// The file, relative to the rootfs.
 const PATH: &str = "etc/login.defs";
 
@@ -59,14 +61,14 @@ impl LoginDefs {
 
     /// Whether the UID is a system UID.
     #[must_use]
-    pub fn is_system(&self, uid: u32) -> bool {
-        uid <= self.sys_uid_max
+    pub fn is_system(&self, uid: Uid) -> bool {
+        uid.as_raw() <= self.sys_uid_max
     }
 
     /// Whether the UID is a regular UID.
     #[must_use]
-    pub fn is_regular(&self, uid: u32) -> bool {
-        (self.uid_min..=self.uid_max).contains(&uid)
+    pub fn is_regular(&self, uid: Uid) -> bool {
+        (self.uid_min..=self.uid_max).contains(&uid.as_raw())
     }
 }
 
@@ -115,7 +117,7 @@ mod tests {
     use indoc::indoc;
 
     use super::*;
-    use crate::testutil::rootfs;
+    use crate::testutil::{rootfs, uid};
 
     #[test]
     fn parses_uid_ranges() -> Result<()> {
@@ -136,11 +138,11 @@ mod tests {
                 uid_max: 50000,
             }
         );
-        assert!(defs.is_system(33));
-        assert!(defs.is_system(1500));
-        assert!(!defs.is_system(1501));
-        assert!(defs.is_regular(3000));
-        assert!(!defs.is_regular(2999));
+        assert!(defs.is_system(uid(33)));
+        assert!(defs.is_system(uid(1500)));
+        assert!(!defs.is_system(uid(1501)));
+        assert!(defs.is_regular(uid(3000)));
+        assert!(!defs.is_regular(uid(2999)));
         Ok(())
     }
 
