@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::process::Command;
 use std::str::FromStr;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
@@ -13,9 +13,11 @@ use tracing::debug;
 use super::{Distro, PackageName, SYSIMAGE};
 use crate::fs::move_dir;
 
+const DATABASE: &str = "var/lib/dpkg";
+
 /// The package state under /var and where it moves under [`SYSIMAGE`].
 const STATE: [(&str, &str); 6] = [
-    ("var/lib/dpkg", "usr/lib/sysimage/dpkg"),
+    (DATABASE, "usr/lib/sysimage/dpkg"),
     ("var/cache/debconf", "usr/lib/sysimage/debconf"),
     ("var/lib/ucf", "usr/lib/sysimage/ucf"),
     ("var/lib/pam", "usr/lib/sysimage/pam"),
@@ -139,6 +141,7 @@ impl Distro for Debian {
     /// Move dpkg's database and the maintainer scripts' state under /usr.
     /// symlink their old paths to the new locations.
     fn relocate_package_state(&self, root: &Dir) -> Result<()> {
+        ensure!(root.exists(DATABASE), "no dpkg database at /{DATABASE}");
         root.create_dir_all(SYSIMAGE)?;
         for (path, target) in STATE {
             let moved = root
