@@ -18,7 +18,7 @@ pub trait CommandRunExt {
     /// # Errors
     ///
     /// Fails if the command cannot start, exits unsuccessfully, or prints
-    /// something other than UTF-8. The error carries the standard error.
+    /// something other than UTF-8. The error includes the command's stderr.
     fn output_string(&mut self) -> Result<String>;
 }
 
