@@ -7,7 +7,7 @@ use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 
-use super::Distro;
+use super::{Distro, PackageName, SYSIMAGE};
 use crate::fs::move_dir;
 
 /// Where pacman keeps its database unless `pacman.conf` says otherwise.
@@ -48,13 +48,13 @@ impl Distro for Arch {
         remove_indexes(root)
     }
 
-    fn package_owning(&self, path: &Utf8Path) -> Result<Option<String>> {
+    fn package_owning(&self, path: &Utf8Path) -> Result<Option<PackageName>> {
         let owner = query(&["-Qqo", path.as_str()], "No package owns")?;
-        Ok(owner.map(|owner| owner.trim().to_owned()))
+        owner.map(|owner| owner.trim().parse()).transpose()
     }
 
-    fn is_installed(&self, name: &str) -> Result<bool> {
-        Ok(query(&["-Q", name], "was not found")?.is_some())
+    fn is_installed(&self, name: &PackageName) -> Result<bool> {
+        Ok(query(&["-Q", name.as_str()], "was not found")?.is_some())
     }
 }
 
@@ -65,7 +65,7 @@ fn move_database(root: &Dir) -> Result<()> {
     if !Utf8Path::new(&from).starts_with("var") {
         return Ok(());
     }
-    root.create_dir_all("usr/lib/sysimage")?;
+    root.create_dir_all(SYSIMAGE)?;
     move_dir(root, &from, USR_DB_PATH)
         .with_context(|| format!("moving /{from} to /{USR_DB_PATH}"))?;
 
@@ -105,7 +105,7 @@ fn remove_indexes(root: &Dir) -> Result<()> {
 }
 
 /// Query the local pacman database. Returns pacman's output, or `None` if
-/// it fails with `not_found` in its error message.
+/// the database has no such path or package.
 fn query(args: &[&str], not_found: &str) -> Result<Option<String>> {
     let output = Command::new("pacman")
         .args(args)
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn moves_database_under_usr_and_adjusts_pacman_conf() -> Result<()> {
+    fn relocates_package_state() -> Result<()> {
         let root = rootfs()?;
         root.create_dir("etc")?;
         root.write(
@@ -180,12 +180,12 @@ mod tests {
         )?;
         root.write("var/lib/pacman/sync/core.db", b"index")?;
 
-        move_database(&root)?;
+        Arch.relocate_package_state(&root)?;
 
         assert!(!root.exists("var/lib/pacman"));
         assert!(root.exists("usr/lib/sysimage/pacman/local/ALPM_DB_VERSION"));
         assert!(root.exists("usr/lib/sysimage/pacman/local/pacman-7.1.0-2/desc"));
-        assert!(root.exists("usr/lib/sysimage/pacman/sync/core.db"));
+        assert_eq!(root.read_dir("usr/lib/sysimage/pacman/sync")?.count(), 0);
         assert_eq!(
             root.read_to_string("etc/pacman.conf")?,
             indoc! {"

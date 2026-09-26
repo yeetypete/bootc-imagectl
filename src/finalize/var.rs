@@ -61,14 +61,16 @@ fn record(entries: &mut BTreeMap<String, String>, declared: &HashSet<String>, en
     }
 }
 
-/// Move the package state out of /var, record what /var must contain at
-/// boot, and empty it.
+/// Empty /var and record in tmpfiles.d what it must contain at boot.
 pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
     distro
         .relocate_package_state(root)
         .context("relocating the package state")?;
     write_var_tmpfiles(root, &UsersCache::new()).context("generating /var tmpfiles.d entries")?;
-    empty_var(root).context("emptying /var")
+    empty_var(root).context("emptying /var")?;
+    distro
+        .restore_package_state(root)
+        .context("restoring the package state")
 }
 
 /// Write a tmpfiles.d file for directories and symlinks in /var.

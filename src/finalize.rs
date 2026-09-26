@@ -34,7 +34,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     info!("finalizing a {} rootfs", distro.name());
 
     accounts::finalize(&root, distro, &opts.sysusers_lock).context("finalizing the accounts")?;
-    initramfs::finalize(&root).context("building the initramfs")?;
+    initramfs::finalize(&root, distro).context("building the initramfs")?;
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;
     var::finalize(&root, distro).context("finalizing /var")?;
