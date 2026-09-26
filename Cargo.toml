@@ -6,7 +6,7 @@ rust-version = "1.98"
 description = "Finalize and install composefs bootc images."
 repository = "https://github.com/yeetypete/bootc-imagectl"
 license = "MIT"
-keywords = ["arch", "bootc", "composefs", "debian", "image"]
+keywords = ["arch", "bootc", "composefs", "debian", "fedora", "image"]
 categories = ["command-line-utilities"]
 publish = false
 

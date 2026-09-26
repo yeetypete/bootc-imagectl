@@ -9,6 +9,7 @@ use cap_std_ext::cap_std::fs_utf8::Dir;
 
 mod arch;
 mod debian;
+mod fedora;
 mod os_release;
 
 /// The name of a package, as defined by its package manager.
@@ -116,6 +117,7 @@ fn from_id(id: &str) -> Option<&'static dyn Distro> {
     match id {
         "arch" => Some(&arch::Arch),
         "debian" => Some(&debian::Debian),
+        "fedora" => Some(&fedora::Fedora),
         _ => None,
     }
 }
@@ -160,6 +162,13 @@ mod tests {
     }
 
     #[test]
+    fn detects_fedora() -> Result<()> {
+        let root = with_os_release("ID=fedora\nVERSION_ID=44\n")?;
+        assert_eq!(detect(&root)?.name(), "fedora");
+        Ok(())
+    }
+
+    #[test]
     fn detects_debian_and_ubuntu() -> Result<()> {
         let root = with_os_release("ID=debian\n")?;
         assert_eq!(detect(&root)?.name(), "debian");
@@ -185,9 +194,9 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_distributions() -> Result<()> {
-        let root = with_os_release("ID=fedora\n")?;
+        let root = with_os_release("ID=opensuse-tumbleweed\nID_LIKE=\"opensuse suse\"\n")?;
         let err = detect(&root).unwrap_err().to_string();
-        assert!(err.contains("fedora"), "{err}");
+        assert!(err.contains("opensuse-tumbleweed"), "{err}");
         Ok(())
     }
 }
