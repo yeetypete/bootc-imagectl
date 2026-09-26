@@ -3,3 +3,4 @@
 mod accounts;
 mod arch;
 mod boot;
+mod ubuntu;

@@ -118,6 +118,13 @@ fn removes_machine_identity() -> Result<()> {
 }
 
 #[test]
+fn stages_kernel_for_bootc() -> Result<()> {
+    let [kver] = names("usr/lib/modules")?.try_into().expect("one kernel");
+    assert!(ROOT.is_file(format!("usr/lib/modules/{}/vmlinuz", kver.display())));
+    Ok(())
+}
+
+#[test]
 fn builds_initramfs() -> Result<()> {
     let [kver] = names("usr/lib/modules")?.try_into().expect("one kernel");
     let modules = format!("usr/lib/modules/{}", kver.display());
