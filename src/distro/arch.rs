@@ -195,6 +195,10 @@ mod tests {
             "}
         );
         assert_eq!(db_path(&root)?, USR_DB_PATH);
+
+        // A second run, e.g. in a derived build, leaves the moved database alone.
+        Arch.relocate_package_state(&root)?;
+        assert!(root.exists("usr/lib/sysimage/pacman/local/ALPM_DB_VERSION"));
         Ok(())
     }
 

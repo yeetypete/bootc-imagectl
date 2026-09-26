@@ -305,9 +305,17 @@ mod tests {
         );
         assert!(root.is_file("var/lib/dpkg/status"));
 
-        // A second run, as in a derived build, leaves the moved state alone.
+        // A second run, e.g. in a derived build, leaves the moved state alone.
         Debian.relocate_package_state(&root)?;
         assert!(root.is_file("var/lib/dpkg/status"));
+        Ok(())
+    }
+
+    #[test]
+    fn fails_without_database() -> Result<()> {
+        let root = rootfs()?;
+        let err = Debian.relocate_package_state(&root).unwrap_err();
+        assert!(err.to_string().contains("/var/lib/dpkg"), "{err}");
         Ok(())
     }
 
