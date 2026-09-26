@@ -8,6 +8,7 @@ use std::ops::ControlFlow;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::fs_utf8::{Dir, MetadataExt, Permissions, PermissionsExt};
 use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8, WalkConfiguration};
 use tracing::{debug, info};
@@ -141,9 +142,38 @@ fn write_var_tmpfiles(root: &Dir, db: &(impl Users + Groups)) -> Result<()> {
     Ok(())
 }
 
+/// The symlinks in /var that point into /usr, relative to the rootfs, and
+/// their targets.
+fn links_into_usr(root: &Dir) -> Result<Vec<(Utf8PathBuf, Utf8PathBuf)>> {
+    let mut links = Vec::new();
+    let Some(var) = root.open_dir_optional("var")? else {
+        return Ok(links);
+    };
+    let config = WalkConfiguration::default().path_base(Path::new("var"));
+    var.as_cap_std()
+        .walk(&config, |e| -> Result<ControlFlow<()>> {
+            if e.file_type.is_symlink() {
+                let path = Utf8Path::from_path(e.path)
+                    .with_context(|| format!("{} is not UTF-8", e.path.display()))?;
+                let into_usr = root
+                    .canonicalize(path)
+                    .is_ok_and(|resolved| resolved.starts_with("usr"));
+                if into_usr {
+                    let target = Utf8PathBuf::try_from(e.dir.read_link_contents(e.filename)?)?;
+                    links.push((path.to_owned(), target));
+                }
+            }
+            Ok(ControlFlow::Continue(()))
+        })
+        .context("scanning /var for links into /usr")?;
+    Ok(links)
+}
+
 /// Empty /var, /run and /tmp. tmpfiles.d recreates their contents at boot.
+/// Symlinks from /var into /usr are kept.
 fn empty_var(root: &Dir) -> Result<()> {
     debug!("emptying /var, /run and /tmp");
+    let links = links_into_usr(root)?;
     for dir in ["run", "tmp"] {
         let Some(entries) = root.open_dir_optional(dir)? else {
             continue;
@@ -175,6 +205,13 @@ fn empty_var(root: &Dir) -> Result<()> {
             .with_context(|| format!("setting the mode of /{dir}"))?;
     }
     for (link, target) in VAR_LINKS {
+        root.symlink(target, link)
+            .with_context(|| format!("linking /{link} -> {target}"))?;
+    }
+    for (link, target) in &links {
+        if let Some(parent) = link.parent() {
+            root.create_dir_all(parent)?;
+        }
         root.symlink(target, link)
             .with_context(|| format!("linking /{link} -> {target}"))?;
     }
@@ -327,6 +364,26 @@ mod tests {
         assert_eq!(root.metadata("var/tmp")?.mode() & 0o7777, 0o1777);
         assert_eq!(root.read_link("var/run")?, "../run");
         assert_eq!(root.read_link("var/lock")?, "../run/lock");
+        Ok(())
+    }
+
+    #[test]
+    fn keeps_links_into_usr() -> Result<()> {
+        let root = rootfs()?;
+        root.create_dir_all("usr/lib/sysimage/dpkg")?;
+        root.create_dir_all("var/lib")?;
+        root.create_dir_all("var/spool/mail")?;
+        root.symlink("../../usr/lib/sysimage/dpkg", "var/lib/dpkg")?;
+        root.symlink("spool/mail", "var/mail")?;
+
+        empty_var(&root)?;
+
+        assert_eq!(
+            root.read_link_contents("var/lib/dpkg")?,
+            "../../usr/lib/sysimage/dpkg"
+        );
+        assert!(!root.exists("var/mail"), "a link within /var is dropped");
+        assert!(!root.exists("var/spool"));
         Ok(())
     }
 
