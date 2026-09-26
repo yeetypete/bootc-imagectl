@@ -28,7 +28,7 @@ use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 
 use super::word::WHITESPACE;
-use super::{Entry, Id, is_config_file_name, lines};
+use super::{Entry, IdSource, Name, is_config_file_name, lines};
 
 /// The comment that starts a block, up to the package name.
 const PACKAGE_HEADER: &str = "package:";
@@ -88,17 +88,22 @@ pub struct LockFile {
 /// Parse an entry line. Every lock file entry must fix its ID.
 fn parse_entry(line: &str) -> Result<Entry> {
     let entry: Entry = line.parse()?;
-    let (name, id) = match &entry {
-        Entry::User(user) => (&user.name, &user.uid),
-        Entry::Group(group) => (&group.name, &group.gid),
-        Entry::Membership(_) => return Ok(entry),
+    match &entry {
+        Entry::User(user) => ensure_fixed(&user.name, &user.uid)?,
+        Entry::Group(group) => ensure_fixed(&group.name, &group.gid)?,
+        Entry::Membership(_) => {}
         Entry::Range(_) => bail!("the lock file takes no r lines"),
-    };
+    }
+    Ok(entry)
+}
+
+/// Fail unless the lock file gives the account `name` a fixed ID.
+fn ensure_fixed<T: fmt::Display>(name: &Name, id: &IdSource<T>) -> Result<()> {
     ensure!(
-        matches!(id, Id::Fixed(_)),
+        matches!(id, IdSource::Fixed(_)),
         "the lock file must give {name} a fixed UID or GID, got {id}"
     );
-    Ok(entry)
+    Ok(())
 }
 
 /// Parse one non-empty line into `blocks`.
@@ -197,7 +202,7 @@ mod tests {
 
     use super::*;
     use crate::sysusers::{Group, Membership};
-    use crate::testutil::rootfs;
+    use crate::testutil::{gid, rootfs};
 
     const EXAMPLE: &str = indoc! {r#"
         # package: avahi-daemon
@@ -268,7 +273,7 @@ mod tests {
             package: Package::Unknown,
             entries: vec![Entry::Group(Group {
                 name: "x".parse()?,
-                gid: Id::Fixed(1),
+                gid: IdSource::Fixed(gid(1)),
             })],
         };
         assert_eq!(block.to_string(), "# package:\ng x 1\n");
@@ -335,7 +340,7 @@ mod tests {
             lock.blocks[0].entries,
             [Entry::Group(Group {
                 name: "x".parse()?,
-                gid: Id::Fixed(1),
+                gid: IdSource::Fixed(gid(1)),
             })]
         );
 

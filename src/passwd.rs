@@ -21,7 +21,8 @@ use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 
-use crate::sysusers::{Name, parse_id};
+use crate::id::{Gid, Uid};
+use crate::sysusers::Name;
 
 /// An entry of one of the account files.
 pub trait Entry: FromStr<Err = anyhow::Error> + fmt::Display + fmt::Debug {
@@ -67,18 +68,6 @@ pub trait Entry: FromStr<Err = anyhow::Error> + fmt::Display + fmt::Debug {
         })
         .with_context(|| format!("writing /{}", Self::PATH))
     }
-}
-
-/// The UID and GID of root.
-pub(crate) const ROOT_ID: u32 = 0;
-
-/// The UID and GID of nobody, the kernel's overflow account.
-pub(crate) const NOBODY_ID: u32 = 65534;
-
-/// Whether the UID or GID is intrinsic, the category systemd assigns to
-/// root and nobody which are always fixed on every system.
-pub(crate) fn is_intrinsic(id: u32) -> bool {
-    matches!(id, ROOT_ID | NOBODY_ID)
 }
 
 /// A field that may be empty, as `None`.
@@ -183,9 +172,9 @@ pub struct Passwd {
     /// `x` when the password is in shadow(5), otherwise the password hash or
     /// a value such as `*` or `!` that matches no password.
     pub password: String,
-    pub uid: u32,
+    pub uid: Uid,
     /// The primary group.
-    pub gid: u32,
+    pub gid: Gid,
     /// The GECOS field, a short description of the account.
     pub gecos: String,
     /// The home directory. Login uses `/` if empty.
@@ -206,8 +195,8 @@ impl FromStr for Passwd {
         Ok(Self {
             name: name.parse()?,
             password: password.to_owned(),
-            uid: parse_id(uid)?,
-            gid: parse_id(gid)?,
+            uid: uid.parse()?,
+            gid: gid.parse()?,
             gecos: gecos.to_owned(),
             home: home.into(),
             shell: shell.into(),
@@ -232,7 +221,7 @@ pub struct Group {
     /// `x` when the password is in gshadow(5), otherwise the password hash
     /// or a value such as `*` or `!` that matches no password.
     pub password: String,
-    pub gid: u32,
+    pub gid: Gid,
     /// The users that are members of the group, other than through their
     /// primary group.
     pub members: Vec<Name>,
@@ -250,7 +239,7 @@ impl FromStr for Group {
         Ok(Self {
             name: name.parse()?,
             password: password.to_owned(),
-            gid: parse_id(gid)?,
+            gid: gid.parse()?,
             members: parse_names(members)?,
         })
     }
@@ -418,7 +407,7 @@ mod tests {
     use indoc::indoc;
 
     use super::*;
-    use crate::testutil::rootfs;
+    use crate::testutil::{gid, rootfs, uid};
 
     fn name(name: &str) -> Name {
         name.parse().expect("a valid name")
@@ -439,8 +428,8 @@ mod tests {
             Passwd {
                 name: name("alice"),
                 password: "x".into(),
-                uid: 1000,
-                gid: 1000,
+                uid: uid(1000),
+                gid: gid(1000),
                 gecos: "Alice,,,".into(),
                 home: "/home/alice".into(),
                 shell: "".into(),
@@ -451,7 +440,7 @@ mod tests {
             Group {
                 name: name("adm"),
                 password: "x".into(),
-                gid: 4,
+                gid: gid(4),
                 members: vec![name("syslog"), name("alice")],
             }
         );

@@ -17,10 +17,11 @@ use uzers::cache::UsersCache;
 use uzers::{Groups, Users};
 
 use crate::distro::Distro;
+use crate::id::{Gid, Uid};
 use crate::login_defs::LoginDefs;
-use crate::passwd::{self, Entry as _, Passwd, Shadow, is_intrinsic, non_empty};
+use crate::passwd::{self, Entry as _, Passwd, Shadow, non_empty};
 use crate::sysusers::lockfile::{Block, LockFile, Package};
-use crate::sysusers::{self, Entry, Id, Index, Membership, Name, PrimaryGroup, User};
+use crate::sysusers::{self, Entry, IdSource, Index, Membership, Name, PrimaryGroup, User};
 use crate::userdb::{self, UserRecord};
 
 /// The directories whose paths must be owned by accounts in the image,
@@ -30,33 +31,34 @@ const OWNED_DIRS: [&str; 2] = ["usr", "etc"];
 /// Account lookups through NSS.
 trait Nss {
     /// The UID of the user with the name.
-    fn uid_of(&self, name: &Name) -> Option<u32>;
+    fn uid_of(&self, name: &Name) -> Option<Uid>;
     /// The name of the user with the UID.
-    fn name_of(&self, uid: u32) -> Option<String>;
+    fn name_of(&self, uid: Uid) -> Option<String>;
     /// The GID of the group with the name.
-    fn gid_of(&self, group: &Name) -> Option<u32>;
+    fn gid_of(&self, group: &Name) -> Option<Gid>;
     /// The groups the user belongs to, as `getgrouplist` merges them from
     /// every NSS source. `gid` is the user's primary group.
-    fn groups_of(&self, user: &Name, gid: u32) -> Option<Vec<String>>;
+    fn groups_of(&self, user: &Name, gid: Gid) -> Option<Vec<String>>;
 }
 
 impl Nss for UsersCache {
-    fn uid_of(&self, name: &Name) -> Option<u32> {
-        self.get_user_by_name(name.as_str()).map(|user| user.uid())
+    fn uid_of(&self, name: &Name) -> Option<Uid> {
+        self.get_user_by_name(name.as_str())
+            .and_then(|user| Uid::new(user.uid()))
     }
 
-    fn name_of(&self, uid: u32) -> Option<String> {
-        self.get_user_by_uid(uid)
+    fn name_of(&self, uid: Uid) -> Option<String> {
+        self.get_user_by_uid(uid.as_raw())
             .map(|user| user.name().to_string_lossy().into_owned())
     }
 
-    fn gid_of(&self, group: &Name) -> Option<u32> {
+    fn gid_of(&self, group: &Name) -> Option<Gid> {
         self.get_group_by_name(group.as_str())
-            .map(|group| group.gid())
+            .and_then(|group| Gid::new(group.gid()))
     }
 
-    fn groups_of(&self, user: &Name, gid: u32) -> Option<Vec<String>> {
-        let groups = uzers::get_user_groups(user.as_str(), gid)?;
+    fn groups_of(&self, user: &Name, gid: Gid) -> Option<Vec<String>> {
+        let groups = uzers::get_user_groups(user.as_str(), gid.as_raw())?;
         Some(
             groups
                 .iter()
@@ -85,12 +87,12 @@ struct Accounts<'a> {
 impl Accounts<'_> {
     /// The users the lock file must cover.
     fn users_to_lock(&self) -> impl Iterator<Item = &Passwd> {
-        self.users.iter().filter(|user| !is_intrinsic(user.uid))
+        self.users.iter().filter(|user| !user.uid.is_intrinsic())
     }
 
     /// The groups the lock file must cover.
     fn groups_to_lock(&self) -> impl Iterator<Item = &passwd::Group> {
-        self.groups.iter().filter(|group| !is_intrinsic(group.gid))
+        self.groups.iter().filter(|group| !group.gid.is_intrinsic())
     }
 
     /// The groups each user with a record belongs to, through its primary
@@ -139,8 +141,8 @@ impl Accounts<'_> {
 /// The ID a path is owned by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Owner {
-    Uid(u32),
-    Gid(u32),
+    Uid(Uid),
+    Gid(Gid),
 }
 
 impl Owner {
@@ -163,20 +165,23 @@ impl fmt::Display for Owner {
 }
 
 /// The status of a user or group in /etc relative to the sysusers.d files.
-enum LockStatus<'a> {
+enum LockStatus<'a, T> {
     /// An entry fixes the ID to the one in /etc.
     Locked,
     /// No entry, or an entry without a fixed ID.
     Missing,
     /// An entry fixes the ID to another one.
-    Drifted { path: &'a Utf8Path, specified: u32 },
+    Drifted { path: &'a Utf8Path, specified: T },
 }
 
 /// The status of an account whose ID in /etc is `id`, given the file and ID
 /// that configure it, if any.
-fn lock_status<'a>(configured: Option<(&'a Utf8Path, &Id)>, id: u32) -> LockStatus<'a> {
+fn lock_status<'a, T: Copy + PartialEq>(
+    configured: Option<(&'a Utf8Path, &IdSource<T>)>,
+    id: T,
+) -> LockStatus<'a, T> {
     match configured {
-        Some((path, Id::Fixed(specified))) => {
+        Some((path, IdSource::Fixed(specified))) => {
             if *specified == id {
                 LockStatus::Locked
             } else {
@@ -279,7 +284,7 @@ fn missing(accounts: &Accounts<'_>) -> Vec<Entry> {
         if let LockStatus::Missing = lock_status(index.gid(&group.name), group.gid) {
             missing.push(Entry::Group(sysusers::Group {
                 name: group.name.clone(),
-                gid: Id::Fixed(group.gid),
+                gid: IdSource::Fixed(group.gid),
             }));
         }
     }
@@ -289,14 +294,14 @@ fn missing(accounts: &Accounts<'_>) -> Vec<Entry> {
         };
         // A `u` line without a primary group creates a group with the user's
         // name and UID.
-        let own_group = user.gid == user.uid
+        let own_group = user.gid == user.uid.matching_gid()
             && accounts
                 .groups
                 .iter()
                 .any(|group| group.name == user.name && group.gid == user.gid);
         missing.push(Entry::User(User {
             name: user.name.clone(),
-            uid: Id::Fixed(user.uid),
+            uid: IdSource::Fixed(user.uid),
             primary_group: (!own_group).then_some(PrimaryGroup::Gid(user.gid)),
             gecos: non_empty(&user.gecos),
             home: non_empty(user.home.as_str()).map(Utf8PathBuf::from),
@@ -314,7 +319,7 @@ fn missing(accounts: &Accounts<'_>) -> Vec<Entry> {
             let intrinsic = accounts
                 .users
                 .iter()
-                .any(|user| user.name == *member && is_intrinsic(user.uid));
+                .any(|user| user.name == *member && user.uid.is_intrinsic());
             if intrinsic || index.memberships.contains(&(member, &group.name)) {
                 continue;
             }
@@ -417,7 +422,11 @@ fn paths_without_account(
             .as_cap_std()
             .walk(&config, |e| -> Result<ControlFlow<()>> {
                 let meta = e.entry.metadata()?;
-                for owner in [Owner::Uid(meta.uid()), Owner::Gid(meta.gid())] {
+                let owners = [
+                    Owner::Uid(meta.uid().try_into()?),
+                    Owner::Gid(meta.gid().try_into()?),
+                ];
+                for owner in owners {
                     if accounts.resolves(owner) {
                         continue;
                     }
@@ -699,10 +708,14 @@ mod tests {
     fn nss(users: &[Passwd], groups: &[passwd::Group]) -> MockUsers {
         let mut nss = MockUsers::with_current_uid(0);
         for user in users {
-            nss.add_user(User::new(user.uid, user.name.as_str(), user.gid));
+            nss.add_user(User::new(
+                user.uid.as_raw(),
+                user.name.as_str(),
+                user.gid.as_raw(),
+            ));
         }
         for group in groups {
-            let mut mock = Group::new(group.gid, group.name.as_str());
+            let mut mock = Group::new(group.gid.as_raw(), group.name.as_str());
             for member in &group.members {
                 mock = mock.add_member(member.as_str());
             }
@@ -712,27 +725,28 @@ mod tests {
     }
 
     impl Nss for MockUsers {
-        fn uid_of(&self, name: &Name) -> Option<u32> {
-            self.get_user_by_name(name.as_str()).map(|user| user.uid())
+        fn uid_of(&self, name: &Name) -> Option<Uid> {
+            self.get_user_by_name(name.as_str())
+                .and_then(|user| Uid::new(user.uid()))
         }
 
-        fn name_of(&self, uid: u32) -> Option<String> {
-            self.get_user_by_uid(uid)
+        fn name_of(&self, uid: Uid) -> Option<String> {
+            self.get_user_by_uid(uid.as_raw())
                 .map(|user| user.name().to_string_lossy().into_owned())
         }
 
-        fn gid_of(&self, group: &Name) -> Option<u32> {
+        fn gid_of(&self, group: &Name) -> Option<Gid> {
             self.get_group_by_name(group.as_str())
-                .map(|group| group.gid())
+                .and_then(|group| Gid::new(group.gid()))
         }
 
         /// The primary group and every group that lists the user, as
         /// `getgrouplist` would collect them.
-        fn groups_of(&self, user: &Name, gid: u32) -> Option<Vec<String>> {
+        fn groups_of(&self, user: &Name, gid: Gid) -> Option<Vec<String>> {
             Some(
                 self.get_all_groups()
                     .filter(|group| {
-                        group.gid() == gid
+                        group.gid() == gid.as_raw()
                             || group.members().iter().any(|member| member == user.as_str())
                     })
                     .map(|group| group.name().to_string_lossy().into_owned())

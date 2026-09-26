@@ -54,6 +54,7 @@ uzers = { version = "0.12", default-features = false, features = ["cache"] }
 
 [dev-dependencies]
 indoc = "2"
+static_assertions = "1"
 uzers = { version = "0.12", default-features = false, features = ["mock"] }
 
 [features]
