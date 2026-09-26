@@ -1,0 +1,44 @@
+ARG FEDORA_IMAGE=registry.fedoraproject.org/fedora:44@sha256:72de8cab9539c06d525c73867d5b46b4390a7c71e441a7d99506dd47cd4f7b75
+
+
+FROM ${FEDORA_IMAGE} AS image
+
+COPY system_files/usr/lib/kernel/ /usr/lib/kernel/
+
+RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --setopt=keepcache=True --setopt=install_weak_deps=False systemd
+
+# Create every user and group with the UID and GID the sysusers lock file fixes
+# before any package can allocate a different one.
+COPY system_files/usr/lib/sysusers.d/00-bootc-imagectl.conf /usr/lib/sysusers.d/
+RUN systemd-sysusers
+
+RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --setopt=keepcache=True --setopt=install_weak_deps=False \
+    bootc \
+    dbus \
+    dracut \
+    kernel \
+    NetworkManager \
+    openssh-server \
+    zstd
+
+# The base image's user, with a password and a group, for the tests of the
+# user records.
+RUN echo 'fedora:fedora' | chpasswd && usermod -aG wheel fedora
+
+COPY system_files/ /
+
+# Enable systemd-timesyncd, which Fedora's presets disable, to test that it
+# stays enabled after the first boot.
+RUN systemctl enable sshd.service systemd-timesyncd.service
+
+LABEL containers.bootc=1
+CMD ["/sbin/init"]
+
+
+FROM image AS finalized
+
+# The xtask passes the directory holding bootc-imagectl as a build context.
+COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
+RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.conf
