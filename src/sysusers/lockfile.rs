@@ -29,6 +29,7 @@ use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 
 use super::word::WHITESPACE;
 use super::{Entry, IdSource, Name, is_config_file_name, lines};
+use crate::distro::PackageName;
 
 /// The comment that starts a block, up to the package name.
 const PACKAGE_HEADER: &str = "package:";
@@ -41,7 +42,7 @@ const LOCK_DIR: &str = "usr/lib/sysusers.d";
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Package {
     /// `# package: <name>`: the package that created the accounts.
-    Named(String),
+    Named(PackageName),
     /// `# package: -`: no package created the accounts, and they are kept
     /// on purpose.
     Unowned,
@@ -62,13 +63,7 @@ impl FromStr for Package {
                 "the '# {PACKAGE_HEADER}' header names no package. Name the package that created the accounts, or - if none did"
             ),
             "-" => Self::Unowned,
-            name => {
-                ensure!(
-                    !name.contains(WHITESPACE),
-                    "the package name {name:?} contains whitespace"
-                );
-                Self::Named(name.to_owned())
-            }
+            name => Self::Named(name.parse()?),
         })
     }
 }
@@ -235,8 +230,8 @@ mod tests {
         assert_eq!(
             packages(&lock),
             [
-                (&Package::Named("avahi-daemon".into()), 2),
-                (&Package::Named("systemd".into()), 3),
+                (&Package::Named("avahi-daemon".parse()?), 2),
+                (&Package::Named("systemd".parse()?), 3),
                 (&Package::Unowned, 1),
             ]
         );
@@ -297,8 +292,8 @@ mod tests {
         assert_eq!(
             packages(&lock),
             [
-                (&Package::Named("x".into()), 1),
-                (&Package::Named("y".into()), 0),
+                (&Package::Named("x".parse()?), 1),
+                (&Package::Named("y".parse()?), 0),
             ]
         );
         Ok(())

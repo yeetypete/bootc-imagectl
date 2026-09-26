@@ -1,0 +1,82 @@
+ARG UBUNTU_IMAGE=docker.io/library/ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
+
+
+FROM ${UBUNTU_IMAGE} AS bootc-builder
+
+ARG BOOTC_VERSION=v1.16.10
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
+    build-essential \
+    ca-certificates \
+    cargo \
+    git \
+    go-md2man \
+    libostree-dev \
+    libssl-dev \
+    libzstd-dev \
+    pkg-config \
+    rustc
+
+WORKDIR /bootc
+
+RUN git clone --depth 1 --branch "${BOOTC_VERSION}" https://github.com/bootc-dev/bootc.git .
+
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/bootc/target,sharing=locked \
+    make bin install DESTDIR=/out
+
+
+FROM ${UBUNTU_IMAGE} AS image
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Keep package installs from generating an initramfs.
+ENV INITRD=No
+COPY system_files/etc/apt/ /etc/apt/
+COPY system_files/etc/initramfs-tools/ /etc/initramfs-tools/
+COPY system_files/usr/lib/kernel/ /usr/lib/kernel/
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y systemd
+
+# Create every user and group with the UID and GID the sysusers lock file fixes
+# before any package can allocate a different one.
+COPY system_files/usr/lib/sysusers.d/00-bootc-imagectl.conf /usr/lib/sysusers.d/
+RUN systemd-sysusers
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get install --no-install-recommends -y \
+    bubblewrap \
+    dracut \
+    libnss-systemd \
+    linux-image-virtual \
+    openssh-server \
+    ostree \
+    systemd-sysv \
+    zstd
+
+# Bootc links against the installed libostree.
+COPY --from=bootc-builder /out/usr/ /usr/
+RUN ldconfig
+
+# The base image's user, with a password, for the tests of the user records.
+RUN echo 'ubuntu:ubuntu' | chpasswd
+
+COPY system_files/ /
+
+RUN systemctl enable systemd-networkd.service ssh.service
+
+LABEL containers.bootc=1
+CMD ["/sbin/init"]
+
+
+FROM image AS finalized
+
+# The xtask passes the directory holding bootc-imagectl as a build context.
+COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
+RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.conf

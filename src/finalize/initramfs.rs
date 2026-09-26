@@ -9,6 +9,7 @@ use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use tracing::debug;
 
 use crate::command::CommandRunExt;
+use crate::distro::Distro;
 use crate::userdb::DROPIN_DIR;
 
 /// Where the kernel packages install to.
@@ -36,11 +37,14 @@ fn kernel_version(root: &Dir) -> Result<String> {
     }
 }
 
-/// Build the initramfs.
-pub(super) fn finalize(root: &Dir) -> Result<()> {
+/// Stage the kernel and build the initramfs.
+pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
     let kver = kernel_version(root)?;
     debug!("building the initramfs for {kver}");
     let moddir = format!("{MODULES}/{kver}");
+    distro
+        .stage_kernel(root, &kver)
+        .context("staging the kernel")?;
     if !root.is_file(format!("{moddir}/vmlinuz")) {
         bail!("no kernel image at /{moddir}/vmlinuz");
     }

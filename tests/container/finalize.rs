@@ -105,7 +105,7 @@ fn empties_var() -> Result<()> {
 
 #[test]
 fn removes_machine_identity() -> Result<()> {
-    assert_eq!(ROOT.read("etc/machine-id")?, b"");
+    assert_eq!(ROOT.read("etc/machine-id")?, b"uninitialized\n");
     assert!(!ROOT.exists("etc/fstab"));
     assert!(!ROOT.exists("etc/passwd-"));
     let ssh = names("etc/ssh")?;
@@ -114,6 +114,13 @@ fn removes_machine_identity() -> Result<()> {
             .any(|name| name.as_encoded_bytes().starts_with(b"ssh_host_")),
         "{ssh:?}"
     );
+    Ok(())
+}
+
+#[test]
+fn stages_kernel_for_bootc() -> Result<()> {
+    let [kver] = names("usr/lib/modules")?.try_into().expect("one kernel");
+    assert!(ROOT.is_file(format!("usr/lib/modules/{}/vmlinuz", kver.display())));
     Ok(())
 }
 
