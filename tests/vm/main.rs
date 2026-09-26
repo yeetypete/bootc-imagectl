@@ -3,4 +3,5 @@
 mod accounts;
 mod arch;
 mod boot;
+mod fedora;
 mod ubuntu;
