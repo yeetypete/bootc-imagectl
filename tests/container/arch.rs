@@ -19,6 +19,23 @@ fn moves_pacman_database_and_removes_its_indexes() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn records_enabled_units_in_presets() -> Result<()> {
+    let presets = ROOT.read_to_string("usr/lib/systemd/system-preset/10-bootc-imagectl.preset")?;
+    assert!(
+        presets.lines().any(|line| line == "enable sshd.service"),
+        "{presets}"
+    );
+    assert!(
+        presets
+            .lines()
+            .any(|line| line == "enable systemd-networkd.socket"),
+        "{presets}"
+    );
+    assert!(!presets.contains("disable"), "{presets}");
+    Ok(())
+}
+
 /// The image's package users and its regular user.
 const ARCH: MovedAccounts = MovedAccounts {
     system_users: &[("avahi", 969), ("uuidd", 970)],

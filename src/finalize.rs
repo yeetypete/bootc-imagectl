@@ -19,6 +19,7 @@ mod identity;
 mod initramfs;
 mod layout;
 mod lint;
+mod presets;
 mod tmpfiles;
 mod var;
 
@@ -38,6 +39,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;
     var::finalize(&root, distro).context("finalizing /var")?;
+    presets::finalize(&root).context("recording enabled units in a preset file")?;
 
     lint::bootc_lint()
 }

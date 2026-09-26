@@ -41,6 +41,12 @@ fn removes_snakeoil_certificate() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn records_enabled_units_in_presets() {
+    // Ubuntu's presets enable every unit the image enables.
+    assert!(!ROOT.exists("usr/lib/systemd/system-preset/10-bootc-imagectl.preset"));
+}
+
 /// The image's package users and its regular user.
 const UBUNTU: MovedAccounts = MovedAccounts {
     system_users: &[("sshd", 992), ("systemd-network", 998)],
