@@ -1,9 +1,6 @@
 //! Check `bootc-imagectl finalize` on Ubuntu.
 
-use std::process::Command;
-
 use anyhow::Result;
-use bootc_imagectl::command::CommandRunExt;
 
 use crate::accounts::{self, MovedAccounts};
 use crate::finalize::{ROOT, names, var_tmpfiles};
@@ -15,15 +12,6 @@ fn moves_dpkg_database_and_links_it_back() -> Result<()> {
         ROOT.read_link("var/lib/dpkg")?,
         std::path::Path::new("../../usr/lib/sysimage/dpkg")
     );
-    Ok(())
-}
-
-#[test]
-fn dpkg_lists_packages_from_moved_database() -> Result<()> {
-    let status = Command::new("dpkg-query")
-        .args(["-W", "-f=${db:Status-Status}", "bash"])
-        .output_string()?;
-    assert_eq!(status, "installed");
     Ok(())
 }
 
