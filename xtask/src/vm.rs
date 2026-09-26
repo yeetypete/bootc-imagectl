@@ -19,7 +19,7 @@ pub(crate) fn run(sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> 
     let test = bound_binary(binary, TARGET)?;
     cmd!(
         sh,
-        "bcvk ephemeral run-ssh --rm --bind {bind} {image} {test} {args...}"
+        "bcvk ephemeral run-ssh --rm --bind {bind} --karg systemd.firstboot=no {image} {test} {args...}"
     )
     .run()?;
     Ok(())

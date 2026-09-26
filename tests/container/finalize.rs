@@ -105,7 +105,7 @@ fn empties_var() -> Result<()> {
 
 #[test]
 fn removes_machine_identity() -> Result<()> {
-    assert_eq!(ROOT.read("etc/machine-id")?, b"");
+    assert_eq!(ROOT.read("etc/machine-id")?, b"uninitialized\n");
     assert!(!ROOT.exists("etc/fstab"));
     assert!(!ROOT.exists("etc/passwd-"));
     let ssh = names("etc/ssh")?;
