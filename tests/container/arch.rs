@@ -52,13 +52,13 @@ fn writes_membership_files_for_primary_and_auxiliary_groups() -> Result<()> {
 }
 
 #[test]
-fn keeps_only_runtime_directories_in_var() -> Result<()> {
+fn keeps_only_expected_entries_in_var() -> Result<()> {
     assert_eq!(names("var")?, ["lock", "run", "tmp"]);
     Ok(())
 }
 
 #[test]
-fn records_mail_spool_in_var_tmpfiles() -> Result<()> {
+fn records_var_entries_in_tmpfiles() -> Result<()> {
     let var = var_tmpfiles()?;
     assert!(var.contains("L /var/mail - - - - spool/mail\n"), "{var}");
     assert!(

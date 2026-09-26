@@ -1,5 +1,7 @@
 //! Check `bootc-imagectl finalize` on Ubuntu.
 
+use std::path::Path;
+
 use anyhow::Result;
 
 use crate::accounts::{self, MovedAccounts};
@@ -10,9 +12,18 @@ fn moves_dpkg_database_and_links_it_back() -> Result<()> {
     assert!(ROOT.exists("usr/lib/sysimage/dpkg/status"));
     assert_eq!(
         ROOT.read_link("var/lib/dpkg")?,
-        std::path::Path::new("../../usr/lib/sysimage/dpkg")
+        Path::new("../../usr/lib/sysimage/dpkg")
+    );
+    assert_eq!(
+        ROOT.read_link("var/cache/debconf")?,
+        Path::new("../../usr/lib/sysimage/debconf")
     );
     Ok(())
+}
+
+#[test]
+fn keeps_apt_log_directory_in_var() {
+    assert!(ROOT.is_dir("var/log/apt"));
 }
 
 /// The image's package users and its regular user.
@@ -48,18 +59,13 @@ fn writes_membership_files_for_primary_and_auxiliary_groups() -> Result<()> {
 }
 
 #[test]
-fn keeps_package_state_links_in_var() -> Result<()> {
+fn keeps_only_expected_entries_in_var() -> Result<()> {
     assert_eq!(names("var")?, ["cache", "lib", "lock", "log", "run", "tmp"]);
-    assert!(ROOT.is_dir("var/log/apt"));
-    assert_eq!(
-        ROOT.read_link("var/cache/debconf")?,
-        std::path::Path::new("../../usr/lib/sysimage/debconf")
-    );
     Ok(())
 }
 
 #[test]
-fn records_package_state_links_in_var_tmpfiles() -> Result<()> {
+fn records_var_entries_in_tmpfiles() -> Result<()> {
     let var = var_tmpfiles()?;
     assert!(
         var.contains("L /var/lib/dpkg - - - - ../../usr/lib/sysimage/dpkg\n"),
