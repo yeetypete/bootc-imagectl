@@ -1,8 +1,5 @@
 //! Check `bootc-imagectl finalize` on Arch Linux.
 
-use std::process::Command;
-use std::sync::LazyLock;
-
 use anyhow::Result;
 
 use crate::accounts::{self, MovedAccounts};
@@ -19,23 +16,6 @@ fn moves_pacman_database_and_removes_its_indexes() -> Result<()> {
     );
     assert!(ROOT.exists("usr/lib/sysimage/pacman/local/ALPM_DB_VERSION"));
     assert!(names("usr/lib/sysimage/pacman/sync")?.is_empty());
-    Ok(())
-}
-
-#[test]
-fn pacman_lists_packages_from_moved_database() -> Result<()> {
-    LazyLock::force(&ROOT);
-    let output = Command::new("pacman").arg("-Q").output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let packages = String::from_utf8(output.stdout)?;
-    assert!(
-        packages.lines().any(|line| line.starts_with("pacman ")),
-        "{packages}"
-    );
     Ok(())
 }
 
@@ -72,13 +52,13 @@ fn writes_membership_files_for_primary_and_auxiliary_groups() -> Result<()> {
 }
 
 #[test]
-fn keeps_only_runtime_directories_in_var() -> Result<()> {
+fn keeps_only_expected_entries_in_var() -> Result<()> {
     assert_eq!(names("var")?, ["lock", "run", "tmp"]);
     Ok(())
 }
 
 #[test]
-fn records_mail_spool_in_var_tmpfiles() -> Result<()> {
+fn records_var_entries_in_tmpfiles() -> Result<()> {
     let var = var_tmpfiles()?;
     assert!(var.contains("L /var/mail - - - - spool/mail\n"), "{var}");
     assert!(

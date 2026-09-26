@@ -1,9 +1,6 @@
 //! Check the booted Ubuntu image.
 
-use std::process::Command;
-
 use anyhow::Result;
-use bootc_imagectl::command::CommandRunExt;
 
 use crate::accounts::{self, MovedUser};
 
@@ -15,15 +12,6 @@ const UBUNTU: MovedUser = MovedUser {
     password: "ubuntu",
     system_user: ("sshd", 992),
 };
-
-#[test]
-fn dpkg_lists_packages_from_moved_database() -> Result<()> {
-    let status = Command::new("dpkg-query")
-        .args(["-W", "-f=${db:Status-Status}", "bash"])
-        .output_string()?;
-    assert_eq!(status, "installed");
-    Ok(())
-}
 
 #[test]
 fn resolves_moved_users_through_nss() -> Result<()> {

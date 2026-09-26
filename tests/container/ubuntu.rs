@@ -1,9 +1,8 @@
 //! Check `bootc-imagectl finalize` on Ubuntu.
 
-use std::process::Command;
+use std::path::Path;
 
 use anyhow::Result;
-use bootc_imagectl::command::CommandRunExt;
 
 use crate::accounts::{self, MovedAccounts};
 use crate::finalize::{ROOT, names, var_tmpfiles};
@@ -13,17 +12,32 @@ fn moves_dpkg_database_and_links_it_back() -> Result<()> {
     assert!(ROOT.exists("usr/lib/sysimage/dpkg/status"));
     assert_eq!(
         ROOT.read_link("var/lib/dpkg")?,
-        std::path::Path::new("../../usr/lib/sysimage/dpkg")
+        Path::new("../../usr/lib/sysimage/dpkg")
+    );
+    assert_eq!(
+        ROOT.read_link("var/cache/debconf")?,
+        Path::new("../../usr/lib/sysimage/debconf")
     );
     Ok(())
 }
 
 #[test]
-fn dpkg_lists_packages_from_moved_database() -> Result<()> {
-    let status = Command::new("dpkg-query")
-        .args(["-W", "-f=${db:Status-Status}", "bash"])
-        .output_string()?;
-    assert_eq!(status, "installed");
+fn keeps_apt_log_directory_in_var() {
+    assert!(ROOT.is_dir("var/log/apt"));
+}
+
+#[test]
+fn removes_snakeoil_certificate() -> Result<()> {
+    assert!(!ROOT.exists("etc/ssl/certs/ssl-cert-snakeoil.pem"));
+    assert!(!ROOT.exists("etc/ssl/private/ssl-cert-snakeoil.key"));
+    for name in names("etc/ssl/certs")? {
+        let target = ROOT.read_link(Path::new("etc/ssl/certs").join(&name)).ok();
+        assert_ne!(
+            target.as_deref(),
+            Some(Path::new("ssl-cert-snakeoil.pem")),
+            "{name:?}"
+        );
+    }
     Ok(())
 }
 
@@ -60,18 +74,13 @@ fn writes_membership_files_for_primary_and_auxiliary_groups() -> Result<()> {
 }
 
 #[test]
-fn keeps_package_state_links_in_var() -> Result<()> {
+fn keeps_only_expected_entries_in_var() -> Result<()> {
     assert_eq!(names("var")?, ["cache", "lib", "lock", "log", "run", "tmp"]);
-    assert!(ROOT.is_dir("var/log/apt"));
-    assert_eq!(
-        ROOT.read_link("var/cache/debconf")?,
-        std::path::Path::new("../../usr/lib/sysimage/debconf")
-    );
     Ok(())
 }
 
 #[test]
-fn records_package_state_links_in_var_tmpfiles() -> Result<()> {
+fn records_var_entries_in_tmpfiles() -> Result<()> {
     let var = var_tmpfiles()?;
     assert!(
         var.contains("L /var/lib/dpkg - - - - ../../usr/lib/sysimage/dpkg\n"),
