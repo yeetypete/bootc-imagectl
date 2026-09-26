@@ -26,6 +26,21 @@ fn keeps_apt_log_directory_in_var() {
     assert!(ROOT.is_dir("var/log/apt"));
 }
 
+#[test]
+fn removes_snakeoil_certificate() -> Result<()> {
+    assert!(!ROOT.exists("etc/ssl/certs/ssl-cert-snakeoil.pem"));
+    assert!(!ROOT.exists("etc/ssl/private/ssl-cert-snakeoil.key"));
+    for name in names("etc/ssl/certs")? {
+        let target = ROOT.read_link(Path::new("etc/ssl/certs").join(&name)).ok();
+        assert_ne!(
+            target.as_deref(),
+            Some(Path::new("ssl-cert-snakeoil.pem")),
+            "{name:?}"
+        );
+    }
+    Ok(())
+}
+
 /// The image's package users and its regular user.
 const UBUNTU: MovedAccounts = MovedAccounts {
     system_users: &[("sshd", 992), ("systemd-network", 998)],
