@@ -106,14 +106,16 @@ jobs:
           tar -xzf "$RUNNER_TEMP/bcvk.tar.gz" -C "$RUNNER_TEMP"
           sudo install -m 755 "$RUNNER_TEMP/bcvk-x86_64-unknown-linux-gnu" /usr/local/bin/bcvk
 
-      # Ubuntu only lets root and the kvm group open /dev/kvm.
-      - name: Allow access to KVM
+      # Ubuntu only lets root and the kvm group open /dev/kvm and
+      # /dev/vhost-vsock.
+      - name: Allow access to KVM and vsock
         if: matrix.suite != 'container'
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+          sudo modprobe vhost_vsock
+          echo 'KERNEL=="kvm|vhost-vsock", GROUP="kvm", MODE="0666"' |
             sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+          sudo udevadm trigger --name-match=kvm --name-match=vhost-vsock
 
       # Ubuntu's AppArmor drops all capabilities from programs run by bwrap,
       # but bcvk's VM needs them.
