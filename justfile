@@ -21,6 +21,10 @@ test-container *args:
 test-vm *args:
     cargo xtask test vm {{ args }}
 
+# Run the install tests.
+test-install *args:
+    cargo xtask test install {{ args }}
+
 # Build a release binary.
 build:
     cargo build --release --locked

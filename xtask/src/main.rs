@@ -1,9 +1,4 @@
 //! Developer tasks, run with `cargo xtask`.
-//!
-//! The container and VM tests need a container or a VM of each image in
-//! tests/images. `cargo xtask test` runs `cargo test` for one of them with
-//! this binary as the cargo runner, which builds the images and runs the
-//! test binary in each.
 
 use std::ffi::OsString;
 use std::io::IsTerminal;
@@ -14,6 +9,7 @@ use clap::{Parser, ValueEnum};
 use xshell::{Shell, cmd};
 
 mod container;
+mod install;
 mod vm;
 
 /// The repository the test images are tagged under.
@@ -21,7 +17,7 @@ const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 
 #[derive(Debug, Parser)]
 enum Task {
-    /// Run the container or the VM tests.
+    /// Run the container, the VM or the install tests.
     Test {
         suite: Suite,
         /// Arguments for the test binary.
@@ -46,6 +42,9 @@ enum Suite {
     Container,
     /// The tests in tests/vm, run in a VM booted from each image.
     Vm,
+    /// The tests in tests/install, run in a VM booted from a disk each
+    /// image is installed onto.
+    Install,
 }
 
 impl Suite {
@@ -53,6 +52,7 @@ impl Suite {
         match self {
             Self::Container => "container",
             Self::Vm => "vm",
+            Self::Install => "install",
         }
     }
 }
@@ -113,6 +113,7 @@ fn run(sh: &Shell, suite: Suite, binary: &Path, args: &[OsString]) -> Result<()>
     let run = match suite {
         Suite::Container => container::run,
         Suite::Vm => vm::run,
+        Suite::Install => install::run,
     };
     for name in &names {
         let image = format!("{REPOSITORY}:{name}");
