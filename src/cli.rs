@@ -2,8 +2,6 @@
 //! a bootc image onto a disk. Only the bootc composefs backend is
 //! supported.
 
-use std::fmt;
-
 use anyhow::Result;
 use cap_std_ext::camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -60,7 +58,7 @@ pub struct InstallOpts {
     pub device: Utf8PathBuf,
 
     /// How to encrypt the root partition.
-    #[arg(long, value_enum, default_value_t = Encrypt::KeyFile)]
+    #[arg(long, value_enum, default_value_t = Encrypt::Passphrase)]
     pub encrypt: Encrypt,
 
     /// Read the root partition's passphrase from a file instead of prompting
@@ -85,23 +83,13 @@ pub struct InstallOpts {
     pub yes: bool,
 }
 
-/// How `install` encrypts the root partition, following systemd-repart's
-/// `Encrypt=`.
+/// How `install` encrypts the root partition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Encrypt {
+    /// Encrypt the root partition with LUKS2, unlocked by a passphrase.
+    Passphrase,
     /// Leave the root partition unencrypted.
     Off,
-    /// Encrypt the root partition with LUKS2, unlocked by a passphrase.
-    KeyFile,
-}
-
-impl fmt::Display for Encrypt {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Off => "off",
-            Self::KeyFile => "key-file",
-        })
-    }
 }
 
 #[cfg(test)]

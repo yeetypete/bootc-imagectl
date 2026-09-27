@@ -45,7 +45,7 @@ pub(super) struct Partitions {
     pub(super) root: Utf8PathBuf,
 }
 
-/// A partition, as `systemd-repart --json` reports it.
+/// A partition, as reported by `systemd-repart --json`.
 #[derive(Debug, Deserialize)]
 struct Partition {
     /// The definition the partition was created from.
@@ -57,7 +57,12 @@ struct Partition {
 pub(super) fn write_definitions(dir: &Utf8Path, encrypt: Encrypt) -> Result<Utf8PathBuf> {
     let definitions = dir.join("repart.d");
     fs::create_dir(&definitions).with_context(|| format!("creating {definitions}"))?;
-    let root = format!("{ROOT_DEFINITION}Encrypt={encrypt}\n");
+    // A passphrase reaches systemd-repart as its --key-file.
+    let mode = match encrypt {
+        Encrypt::Passphrase => "key-file",
+        Encrypt::Off => "off",
+    };
+    let root = format!("{ROOT_DEFINITION}Encrypt={mode}\n");
     for (name, content) in [(ESP_FILE, ESP_DEFINITION), (ROOT_FILE, root.as_str())] {
         let path = definitions.join(name);
         fs::write(&path, content).with_context(|| format!("writing {path}"))?;
@@ -114,7 +119,7 @@ mod tests {
     fn writes_encrypted_definitions() {
         let dir = tempfile::tempdir().unwrap();
         let dir = Utf8Path::from_path(dir.path()).unwrap();
-        let definitions = write_definitions(dir, Encrypt::KeyFile).unwrap();
+        let definitions = write_definitions(dir, Encrypt::Passphrase).unwrap();
         assert!(
             fs::read_to_string(definitions.join("10-esp.conf"))
                 .unwrap()

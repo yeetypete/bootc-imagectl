@@ -38,8 +38,8 @@ const MAPPING: &str = "bootc-imagectl-root";
 /// confirm, or a step fails.
 pub fn install(opts: &InstallOpts) -> Result<()> {
     ensure!(
-        opts.encrypt == Encrypt::KeyFile || opts.key_file.is_none(),
-        "--key-file needs --encrypt key-file"
+        opts.encrypt == Encrypt::Passphrase || opts.key_file.is_none(),
+        "--key-file needs --encrypt passphrase"
     );
     ensure!(
         rustix::process::geteuid().is_root(),
@@ -65,8 +65,8 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
     let tmp = Utf8Path::from_path(tmp_dir.path()).context("temporary directory is not UTF-8")?;
     let key_file = match (opts.encrypt, &opts.key_file) {
         (Encrypt::Off, _) => None,
-        (Encrypt::KeyFile, Some(path)) => Some(path.clone()),
-        (Encrypt::KeyFile, None) => Some(write_key_file(tmp, &prompt_passphrase()?)?),
+        (Encrypt::Passphrase, Some(path)) => Some(path.clone()),
+        (Encrypt::Passphrase, None) => Some(write_key_file(tmp, &prompt_passphrase()?)?),
     };
 
     info!("partitioning {device}");
@@ -140,7 +140,7 @@ fn check_image(encrypt: Encrypt) -> Result<()> {
         "systemd-repart",
         "udevadm",
     ];
-    if encrypt == Encrypt::KeyFile {
+    if encrypt == Encrypt::Passphrase {
         tools.push("cryptsetup");
     }
     let missing: Vec<_> = tools
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn encrypts_by_default() {
-        assert_eq!(install_opts(&["/dev/vdb"]).encrypt, Encrypt::KeyFile);
+        assert_eq!(install_opts(&["/dev/vdb"]).encrypt, Encrypt::Passphrase);
     }
 
     #[test]
