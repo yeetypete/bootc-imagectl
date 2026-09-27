@@ -115,6 +115,15 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # Ubuntu's AppArmor drops all capabilities from programs run by bwrap,
+      # but bcvk's VM needs them.
+      - name: Allow capabilities under bwrap
+        if: matrix.suite != 'container'
+        run: |
+          printf '%s\n' 'priority=100 allow file rwlkm /**,' 'priority=100 allow ix /**,' |
+            sudo tee /etc/apparmor.d/local/bwrap-userns-restrict
+          sudo apparmor_parser --replace /etc/apparmor.d/bwrap-userns-restrict
+
       - name: Run ${{ matrix.suite }} tests
         run: just test-${{ matrix.suite }}
 
