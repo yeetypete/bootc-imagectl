@@ -43,10 +43,12 @@ RUN systemd-sysusers
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman -Syu --noconfirm --needed \
     base \
+    dosfstools \
     dracut \
     linux \
     openssh \
     ostree \
+    skopeo \
     zstd
 
 # A regular user with a password and a group, for the tests of the user

@@ -41,6 +41,12 @@ name = "vm"
 path = "tests/vm/main.rs"
 required-features = ["vm"]
 
+# The install tests, see tests/install/main.rs.
+[[test]]
+name = "install"
+path = "tests/install/main.rs"
+required-features = ["install"]
+
 [dependencies]
 anyhow = { workspace = true }
 camino = { version = "1", features = ["serde1"] }
@@ -63,6 +69,7 @@ uzers = { version = "0.12", default-features = false, features = ["mock"] }
 
 [features]
 container = []
+install = []
 vm = []
 
 [lints]

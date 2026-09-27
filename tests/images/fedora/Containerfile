@@ -21,11 +21,15 @@ RUN systemd-sysusers
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     dnf install -y --setopt=keepcache=True --setopt=install_weak_deps=False \
     bootc \
+    cryptsetup \
     dbus \
+    dosfstools \
     dracut \
+    e2fsprogs \
     kernel \
     NetworkManager \
     openssh-server \
+    systemd-boot-unsigned \
     zstd
 
 # The base image's user, with a password and a group, for the tests of the

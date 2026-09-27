@@ -57,12 +57,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get install --no-install-recommends -y \
     bubblewrap \
+    cryptsetup-bin \
+    dmsetup \
+    dosfstools \
     dracut \
+    fdisk \
     libnss-systemd \
     linux-image-virtual \
     openssh-server \
     ostree \
+    skopeo \
     ssl-cert \
+    systemd-boot \
+    systemd-boot-efi \
+    systemd-cryptsetup \
+    systemd-repart \
     systemd-sysv \
     zstd
 

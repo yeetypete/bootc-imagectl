@@ -58,7 +58,7 @@ enum Preset {
     Ignored,
 }
 
-/// A unit file, as `systemctl list-unit-files --output=json` reports it.
+/// A unit file, as reported by `systemctl list-unit-files --output=json`.
 #[derive(Debug, Deserialize)]
 struct UnitFile {
     #[serde(rename = "unit_file")]
