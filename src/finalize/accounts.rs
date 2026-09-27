@@ -775,7 +775,7 @@ mod tests {
             let mut files = Vec::new();
             if let Some(lock) = &lock {
                 files.push(ConfigFile {
-                    path: "usr/lib/sysusers.d/00-bootc-imagectl.conf".into(),
+                    path: "usr/lib/sysusers.d/00-bootc-imagectl.lock.conf".into(),
                     entries: sysusers::parse(&lock.to_string())?,
                 });
             }
@@ -807,7 +807,7 @@ mod tests {
                 root: &self.root,
                 distro: &self.distro,
                 nss: &self.nss,
-                lock_path: Utf8Path::new("usr/lib/sysusers.d/00-bootc-imagectl.conf"),
+                lock_path: Utf8Path::new("usr/lib/sysusers.d/00-bootc-imagectl.lock.conf"),
                 lock: self.lock.as_ref(),
                 users: &self.users,
                 groups: &self.groups,

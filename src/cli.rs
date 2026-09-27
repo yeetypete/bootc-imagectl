@@ -40,7 +40,7 @@ pub enum Command {
 /// Options for `finalize`.
 #[derive(Debug, Args)]
 pub struct FinalizeOpts {
-    /// The image's sysusers lock file, e.g. /usr/lib/sysusers.d/00-bootc-imagectl.conf.
+    /// The image's sysusers lock file, e.g. /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf.
     ///
     /// The lock file lists every user and group the build creates with a fixed
     /// UID and GID. finalize fails the build if any account is missing from it

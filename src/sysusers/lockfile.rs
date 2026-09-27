@@ -211,7 +211,7 @@ mod tests {
         g utmp 5
     "#};
 
-    const LOCK_PATH: &str = "usr/lib/sysusers.d/00-bootc-imagectl.conf";
+    const LOCK_PATH: &str = "usr/lib/sysusers.d/00-bootc-imagectl.lock.conf";
 
     fn lock_path() -> &'static Utf8Path {
         Utf8Path::new(LOCK_PATH)

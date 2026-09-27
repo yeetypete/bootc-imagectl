@@ -3,7 +3,7 @@
 //! Runs inside the image being built, after the last package install:
 //!
 //! ```text
-//! RUN bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.conf
+//! RUN bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
 //! ```
 
 use anyhow::{Context, Result};
