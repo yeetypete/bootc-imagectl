@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
-clap = { workspace = true }
+clap = { workspace = true, features = ["env"] }
 rustix = { version = "1", features = ["process"] }
 xshell = { workspace = true }
 

@@ -5,7 +5,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, ValueEnum};
 use xshell::{Shell, cmd};
 
 mod container;
@@ -15,10 +15,16 @@ mod vm;
 /// The repository the test images are tagged under.
 const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 
+/// The environment variables setting `Build`.
+const BUILDER_ENV: &str = "BOOTC_IMAGECTL_BUILDER";
+const BUILD_OPTIONS_ENV: &str = "BOOTC_IMAGECTL_BUILD_OPTIONS";
+
 #[derive(Debug, Parser)]
 enum Task {
     /// Run the container, the VM or the install tests.
     Test {
+        #[command(flatten)]
+        build: Build,
         suite: Suite,
         /// Arguments for the test binary.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -28,6 +34,8 @@ enum Task {
     /// this through `test`.
     #[command(hide = true)]
     Runner {
+        #[command(flatten)]
+        build: Build,
         suite: Suite,
         binary: PathBuf,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -47,6 +55,65 @@ enum Suite {
     Install,
 }
 
+/// How the test images are built. `test` passes these to the runner
+/// through the environment.
+#[derive(Debug, Args)]
+struct Build {
+    /// The builder that builds the test images.
+    #[arg(long, env = BUILDER_ENV, value_enum, default_value_t)]
+    builder: Builder,
+    /// An option passed to the builder, such as a cache. `{image}` is
+    /// replaced by the image name.
+    #[arg(long = "build-option", env = BUILD_OPTIONS_ENV, value_delimiter = ' ', allow_hyphen_values = true)]
+    options: Vec<String>,
+}
+
+impl Build {
+    /// Build the image in `dir` as `image`, with the bootc-imagectl binary
+    /// from `target`.
+    fn build(&self, sh: &Shell, name: &str, image: &str, dir: &Path, target: &Path) -> Result<()> {
+        let options: Vec<String> = self
+            .options
+            .iter()
+            .map(|option| option.replace("{image}", name))
+            .collect();
+        match self.builder {
+            Builder::Podman => cmd!(
+                sh,
+                "podman build {options...} --build-context bootc-imagectl={target} --tag {image} {dir}"
+            )
+            .run()?,
+            Builder::Docker => {
+                let containerfile = dir.join("Containerfile");
+                cmd!(
+                    sh,
+                    "docker buildx build --load {options...} --build-context bootc-imagectl={target} --file {containerfile} --tag {image} {dir}"
+                )
+                .run()?;
+                cmd!(sh, "podman pull docker-daemon:{image}").run()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A tool that builds the test images.
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum Builder {
+    #[default]
+    Podman,
+    Docker,
+}
+
+impl Builder {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Podman => "podman",
+            Self::Docker => "docker",
+        }
+    }
+}
+
 impl Suite {
     fn name(self) -> &'static str {
         match self {
@@ -60,17 +127,18 @@ impl Suite {
 fn main() -> Result<()> {
     let sh = Shell::new()?;
     match Task::parse() {
-        Task::Test { suite, args } => test(&sh, suite, &args),
+        Task::Test { build, suite, args } => test(&sh, &build, suite, &args),
         Task::Runner {
+            build,
             suite,
             binary,
             args,
-        } => run(&sh, suite, &binary, &args),
+        } => run(&sh, &build, suite, &binary, &args),
     }
 }
 
 /// Run `cargo test` for the suite with this binary as the runner.
-fn test(sh: &Shell, suite: Suite, args: &[OsString]) -> Result<()> {
+fn test(sh: &Shell, build: &Build, suite: Suite, args: &[OsString]) -> Result<()> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let name = suite.name();
     let xtask = std::env::current_exe()?;
@@ -78,11 +146,18 @@ fn test(sh: &Shell, suite: Suite, args: &[OsString]) -> Result<()> {
         "target.'cfg(unix)'.runner=['{}', 'runner', '{name}']",
         xtask.display()
     );
-    cmd!(
+    let mut cargo = cmd!(
         sh,
         "{cargo} test --locked --features {name} --test {name} --config {runner} -- {args...}"
     )
-    .run()?;
+    .env(BUILDER_ENV, build.builder.name());
+    // An empty variable would pass an empty option.
+    cargo = if build.options.is_empty() {
+        cargo.env_remove(BUILD_OPTIONS_ENV)
+    } else {
+        cargo.env(BUILD_OPTIONS_ENV, build.options.join(" "))
+    };
+    cargo.run()?;
     Ok(())
 }
 
@@ -107,7 +182,7 @@ fn image_names(images: &Path) -> Result<Vec<String>> {
 /// Build each image in tests/images and run the test binary against it.
 /// The tests of the other images live in modules named after them and are
 /// skipped.
-fn run(sh: &Shell, suite: Suite, binary: &Path, args: &[OsString]) -> Result<()> {
+fn run(sh: &Shell, build: &Build, suite: Suite, binary: &Path, args: &[OsString]) -> Result<()> {
     let images = images_dir()?;
     let names = image_names(&images)?;
     let run = match suite {
@@ -119,11 +194,7 @@ fn run(sh: &Shell, suite: Suite, binary: &Path, args: &[OsString]) -> Result<()>
         let image = format!("{REPOSITORY}:{name}");
         let dir = images.join(name);
         let target = target_dir(binary)?;
-        cmd!(
-            sh,
-            "podman build --build-context bootc-imagectl={target} --tag {image} {dir}"
-        )
-        .run()?;
+        build.build(sh, name, &image, &dir, target)?;
         let mut args = args.to_vec();
         for other in names.iter().filter(|other| *other != name) {
             args.push("--skip".into());
