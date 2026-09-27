@@ -55,7 +55,8 @@ RUN systemd-sysusers
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get install --no-install-recommends -y \
+    apt-get update && apt-get install --no-install-recommends -y \
+    binutils \
     bubblewrap \
     cryptsetup-bin \
     dmsetup \

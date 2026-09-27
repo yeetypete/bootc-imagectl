@@ -124,6 +124,8 @@ fn install(sh: &Shell, image: &str, work: &Path, disk: &Path) -> Result<()> {
 #[must_use = "stops the VM when dropped"]
 struct Vm {
     vmspawn: Child,
+    /// The VM's vsock CID, which ssh connects to.
+    cid: u32,
     /// systemd-vmspawn's runtime directory.
     runtime_dir: PathBuf,
     /// The private SSH key systemd-vmspawn generates for the VM.
@@ -145,13 +147,13 @@ impl Vm {
         fs::create_dir(&runtime_dir)?;
         let journal = work.join("journal");
         fs::create_dir(&journal)?;
+        let cid = random_cid();
         let vmspawn = Command::new("systemd-vmspawn")
             .env("RUNTIME_DIRECTORY", &runtime_dir)
             .arg(format!("--image={}", disk.display()))
             .arg(format!("--machine={MACHINE}"))
-            // Registered with the user's systemd-machined, so that ssh finds
-            // the VM by its name.
-            .args(["--ram=4G", "--register=yes", "--console=read-only"])
+            .args(["--ram=4G", "--register=no", "--console=read-only"])
+            .arg(format!("--vsock-cid={cid}"))
             // The tests do not need TPM.
             .arg("--tpm=no")
             .arg(format!(
@@ -175,6 +177,7 @@ impl Vm {
             })?;
         Ok(Self {
             vmspawn,
+            cid,
             key: runtime_dir.join(format!("{MACHINE}-ed25519")),
             runtime_dir,
             work: work.to_owned(),
@@ -185,7 +188,7 @@ impl Vm {
     /// generated.
     fn wait_for_ssh(&mut self, sh: &Shell) -> Result<()> {
         let start = Instant::now();
-        let (options, host) = (&self.ssh_options(), ssh_host());
+        let (options, host) = (&self.ssh_options(), self.ssh_host());
         loop {
             if cmd!(sh, "ssh {options...} {host} true")
                 .quiet()
@@ -213,7 +216,7 @@ impl Vm {
 
     /// Run the test binary in the VM, from the bound target directory.
     fn run_tests(&self, sh: &Shell, binary: &Path, args: &[OsString]) -> Result<()> {
-        let (options, host) = (&self.ssh_options(), ssh_host());
+        let (options, host) = (&self.ssh_options(), self.ssh_host());
         let test = bound_binary(binary, TARGET)?;
         let term = format!("TERM={}", env::var("TERM").unwrap_or_default());
         cmd!(sh, "ssh {options...} {host} env {term} {test} {args...}").run()?;
@@ -228,11 +231,16 @@ impl Vm {
         }
         options
     }
+
+    /// The ssh destination of the VM's root account.
+    fn ssh_host(&self) -> String {
+        format!("root@vsock/{}", self.cid)
+    }
 }
 
-/// The ssh destination of the VM's root account.
-fn ssh_host() -> String {
-    format!("root@machine/{MACHINE}")
+/// A random vsock CID, excluding the reserved CIDs 0 to 2 and `u32::MAX`.
+fn random_cid() -> u32 {
+    rand::random_range(3..u32::MAX)
 }
 
 impl Drop for Vm {

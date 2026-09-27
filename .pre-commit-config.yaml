@@ -10,6 +10,14 @@ repos:
       - id: mixed-line-ending
       - id: trailing-whitespace
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.23.2
+    rev: v0.23.3
     hooks:
       - id: markdownlint-cli2
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.11.0
+    hooks:
+      - id: shellcheck
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint-docker

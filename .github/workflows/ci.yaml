@@ -1,0 +1,140 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run pre-commit hooks
+        uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
+
+  check:
+    name: check
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Check formatting and lint
+        run: just check
+
+  test:
+    name: test
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Run unit tests
+        run: just test
+
+  test-suite:
+    name: test-${{ matrix.suite }}
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [container, vm, install]
+    env:
+      BOOTC_IMAGECTL_BUILDER: docker
+      BOOTC_IMAGECTL_BUILD_OPTIONS: >-
+        --cache-from=type=gha,scope={image}
+        --cache-to=type=gha,mode=max,scope={image}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Exposes the GitHub Actions cache to Buildx.
+      - name: Expose GitHub runtime
+        uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
+      - name: Install VM tools
+        if: matrix.suite != 'container'
+        env:
+          BCVK_VERSION: 0.19.0
+          BCVK_SHA256: e6e3e2e8c13546d30481b035217442de78f2efe3e5a3bd3dbfb58d38345b4b98
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qemu-system-x86 \
+            qemu-utils ovmf virtiofsd systemd-container systemd-journal-remote
+          curl -fsSLo "$RUNNER_TEMP/bcvk.tar.gz" \
+            "https://github.com/bootc-dev/bcvk/releases/download/v$BCVK_VERSION/bcvk-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$BCVK_SHA256  $RUNNER_TEMP/bcvk.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/bcvk.tar.gz" -C "$RUNNER_TEMP"
+          sudo install -m 755 "$RUNNER_TEMP/bcvk-x86_64-unknown-linux-gnu" /usr/local/bin/bcvk
+
+      # Ubuntu only lets root and the kvm group open /dev/kvm and
+      # /dev/vhost-vsock.
+      - name: Allow access to KVM and vsock
+        if: matrix.suite != 'container'
+        run: |
+          sudo modprobe vhost_vsock
+          echo 'KERNEL=="kvm|vhost-vsock", GROUP="kvm", MODE="0666"' |
+            sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm --name-match=vhost-vsock
+
+      # Ubuntu's AppArmor drops all capabilities from programs run by bwrap,
+      # but bcvk's VM needs them.
+      - name: Allow capabilities under bwrap
+        if: matrix.suite != 'container'
+        run: |
+          printf '%s\n' 'priority=100 allow file rwlkm /**,' 'priority=100 allow ix /**,' |
+            sudo tee /etc/apparmor.d/local/bwrap-userns-restrict
+          sudo apparmor_parser --replace /etc/apparmor.d/bwrap-userns-restrict
+
+      - name: Run ${{ matrix.suite }} tests
+        run: just test-${{ matrix.suite }}
+
+      - name: Upload install logs
+        if: failure() && matrix.suite == 'install'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: install-logs
+          path: |
+            target/debug/install/console.log
+            target/debug/install/vmspawn.log
+            target/debug/install/journal
