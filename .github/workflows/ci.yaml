@@ -106,6 +106,15 @@ jobs:
           tar -xzf "$RUNNER_TEMP/bcvk.tar.gz" -C "$RUNNER_TEMP"
           sudo install -m 755 "$RUNNER_TEMP/bcvk-x86_64-unknown-linux-gnu" /usr/local/bin/bcvk
 
+      # Ubuntu only lets root and the kvm group open /dev/kvm.
+      - name: Allow access to KVM
+        if: matrix.suite != 'container'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - name: Run ${{ matrix.suite }} tests
         run: just test-${{ matrix.suite }}
 
