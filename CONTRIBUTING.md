@@ -35,9 +35,9 @@ distribution in [`tests/images`](tests/images):
 > [the CI workflow](.github/workflows/ci.yaml).
 
 The `just test-*` recipes run `cargo xtask test <suite>`. This command builds
-`bootc-imagectl` from the working tree, builds each image, then runs the
-suite's test binary in the image. Arguments after the suite go to the test
-binary, for example a test name filter.
+`bootc-imagectl` from the working tree, builds each image with it, then runs
+the suite's test binary in the image. Arguments after the suite go to the
+test binary, for example a test name filter.
 
 Images are built with Podman by default. `--builder docker` (or
 `BOOTC_IMAGECTL_BUILDER=docker`) builds them with Docker Buildx instead.
@@ -45,9 +45,10 @@ Images are built with Podman by default. `--builder docker` (or
 the builder, such as a cache. `{image}` in an option is automatically
 replaced by the name of the image being built, e.g. `fedora`.
 
-When an install test fails, logs of the booted system can be found in
-`target/debug/install`, containing `console.log`, `vmspawn.log`, and `journal`.
-The journal can be read with `journalctl --directory=target/debug/install/journal`.
+When an install test fails, the logs of the booted system are in
+`target/debug/install`, which contains `console.log`, `vmspawn.log` and
+`journal`. The journal can be read with
+`journalctl --directory=target/debug/install/journal`.
 
 ### Writing tests
 
