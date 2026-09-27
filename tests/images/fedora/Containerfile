@@ -1,16 +1,21 @@
 ARG FEDORA_IMAGE=registry.fedoraproject.org/fedora:44@sha256:72de8cab9539c06d525c73867d5b46b4390a7c71e441a7d99506dd47cd4f7b75
 
 
+FROM ${FEDORA_IMAGE} AS system-files
+
+COPY system_files/ /system_files/
+RUN chmod -R go-w /system_files
+
 FROM ${FEDORA_IMAGE} AS image
 
-COPY system_files/usr/lib/kernel/ /usr/lib/kernel/
+COPY --from=system-files /system_files/usr/lib/kernel/ /usr/lib/kernel/
 
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     dnf install -y --setopt=keepcache=True --setopt=install_weak_deps=False systemd
 
 # Create every user and group with the UID and GID the sysusers lock file fixes
 # before any package can allocate a different one.
-COPY system_files/usr/lib/sysusers.d/00-bootc-imagectl.conf /usr/lib/sysusers.d/
+COPY --from=system-files /system_files/usr/lib/sysusers.d/00-bootc-imagectl.conf /usr/lib/sysusers.d/
 RUN systemd-sysusers
 
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
@@ -27,7 +32,7 @@ RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
 # user records.
 RUN echo 'fedora:fedora' | chpasswd && usermod -aG wheel fedora
 
-COPY system_files/ /
+COPY --from=system-files /system_files/ /
 
 # Enable systemd-timesyncd, which Fedora's presets disable, to test that it
 # stays enabled after the first boot.

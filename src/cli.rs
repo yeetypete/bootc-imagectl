@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use cap_std_ext::camino::Utf8PathBuf;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{finalize, install};
 
@@ -52,7 +52,45 @@ pub struct FinalizeOpts {
 
 /// Options for `install`.
 #[derive(Debug, Args)]
-pub struct InstallOpts {}
+pub struct InstallOpts {
+    /// The disk to install to, e.g. /dev/nvme0n1. Every partition on it is
+    /// destroyed.
+    pub device: Utf8PathBuf,
+
+    /// How to encrypt the root partition.
+    #[arg(long, value_enum, default_value_t = Encrypt::Passphrase)]
+    pub encrypt: Encrypt,
+
+    /// Read the root partition's passphrase from a file instead of prompting
+    /// for it. The whole file is the passphrase, including any trailing
+    /// newline.
+    #[arg(long, value_name = "PATH")]
+    pub key_file: Option<Utf8PathBuf>,
+
+    /// The image to install, in containers-transports(5) form, e.g.
+    /// `docker://docker.io/example/image:latest`. Defaults to the image of the
+    /// podman container this runs in.
+    #[arg(long, value_name = "IMGREF")]
+    pub source_imgref: Option<String>,
+
+    /// The registry reference the installed system updates from, e.g.
+    /// `docker.io/example/image:latest`. Defaults to the source.
+    #[arg(long, value_name = "IMGREF")]
+    pub target_imgref: Option<String>,
+
+    /// Wipe the disk without asking for confirmation.
+    #[arg(long)]
+    pub yes: bool,
+}
+
+/// How `install` encrypts the root partition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Encrypt {
+    /// Encrypt the root partition with LUKS2, unlocked by a passphrase.
+    Passphrase,
+    /// Leave the root partition unencrypted.
+    Off,
+}
 
 #[cfg(test)]
 mod tests {

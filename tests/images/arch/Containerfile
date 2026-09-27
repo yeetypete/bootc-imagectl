@@ -1,6 +1,11 @@
 ARG ARCH_IMAGE=docker.io/archlinux/archlinux:base-20260906.0.587188@sha256:1eb3314f8f66ab90c8c755acaf9a5502c705b81104cb885ea69f1c74f3a6bb80
 
 
+FROM ${ARCH_IMAGE} AS system-files
+
+COPY system_files/ /system_files/
+RUN chmod -R go-w /system_files
+
 FROM ${ARCH_IMAGE} AS bootc-builder
 
 ARG BOOTC_VERSION=v1.16.10
@@ -32,7 +37,7 @@ RUN mkdir -p /etc/pacman.d/hooks && \
 
 # Create every user and group with the UID and GID the sysusers lock file fixes
 # before any package can allocate a different one.
-COPY system_files/usr/lib/sysusers.d/00-bootc-imagectl.conf /usr/lib/sysusers.d/
+COPY --from=system-files /system_files/usr/lib/sysusers.d/00-bootc-imagectl.conf /usr/lib/sysusers.d/
 RUN systemd-sysusers
 
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
@@ -53,7 +58,7 @@ COPY --from=bootc-builder /out/usr/ /usr/
 # Bootc links against the installed libostree.
 RUN ldconfig
 
-COPY system_files/ /
+COPY --from=system-files /system_files/ /
 
 RUN systemctl enable systemd-networkd.service sshd.service remote-fs.target
 
