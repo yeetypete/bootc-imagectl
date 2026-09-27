@@ -11,6 +11,7 @@ FROM ${ARCH_IMAGE} AS bootc-builder
 ARG BOOTC_VERSION=v1.16.10
 
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman-key --init && pacman-key --populate archlinux && \
     pacman -Syu --noconfirm --needed \
     git \
     go-md2man \
@@ -37,10 +38,11 @@ RUN mkdir -p /etc/pacman.d/hooks && \
 
 # Create every user and group with the UID and GID the sysusers lock file fixes
 # before any package can allocate a different one.
-COPY --from=system-files /system_files/usr/lib/sysusers.d/00-bootc-imagectl.conf /usr/lib/sysusers.d/
+COPY --from=system-files /system_files/usr/lib/sysusers.d/00-bootc-imagectl.lock.conf /usr/lib/sysusers.d/
 RUN systemd-sysusers
 
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman-key --init && pacman-key --populate archlinux && \
     pacman -Syu --noconfirm --needed \
     base \
     dosfstools \
@@ -72,4 +74,4 @@ FROM image AS finalized
 
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.conf
+RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf

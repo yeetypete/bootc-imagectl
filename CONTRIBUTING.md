@@ -1,0 +1,58 @@
+# Contributing
+
+## Setup
+
+Tasks run through [`just`](https://github.com/casey/just):
+
+```bash
+just check           # Formatting and clippy.
+just test            # Unit tests.
+just test-container  # Container tests.
+just test-vm         # VM tests.
+just test-install    # Install tests.
+```
+
+`bootc-imagectl` uses [prek](https://github.com/j178/prek) (or `pre-commit`)
+hooks for whitespace, TOML, YAML and Markdown. Install them with
+`prek install`.
+
+## Tests
+
+`bootc-imagectl` has three test suites, which run against a real image of each
+distribution in [`tests/images`](tests/images):
+
+| Suite | Runs in | Host requirements |
+| --- | --- | --- |
+| `tests/container` | A container of each finalized image | Podman |
+| `tests/vm` | A VM booted from each image | Podman, [bcvk](https://github.com/bootc-dev/bcvk) |
+| `tests/install` | A VM booted from a disk each image is installed onto | Podman, bcvk, systemd-vmspawn 259 or newer, systemd-journal-remote, virtiofsd, membership in the `kvm` group |
+
+`cargo xtask test <suite>` builds `bootc-imagectl` from the working tree,
+builds each image with it, then runs the suite's test binary in the image.
+Arguments after the suite go to the test binary, for example a test name
+filter.
+
+When an install test fails, the logs of the booted system are in
+`target/debug/install`: `console.log`, `vmspawn.log`, and the forwarded
+journal, which `journalctl --directory=target/debug/install/journal` reads.
+
+### Writing tests
+
+A test for one image goes in the suite's module named after the image, such
+as `tests/vm/fedora.rs`. The runner skips the other images' modules. A check
+that applies to every image should share the the same test name in each module
+and call a shared function.
+
+## Adding a distribution
+
+A distribution needs:
+
+- A backend in [`src/distro`](src/distro) that implements the `Distro` trait,
+  selected by its os-release `ID` in [`src/distro.rs`](src/distro.rs).
+  Derivatives that list it in `ID_LIKE` in `/etc/os-release` may use it too.
+- A test image in `tests/images/<name>`, with its sysusers lock file.
+- A module per test suite in `tests/*/<name>.rs`.
+
+## Commits
+
+Commit messages should follow [Conventional Commits](https://www.conventionalcommits.org/).

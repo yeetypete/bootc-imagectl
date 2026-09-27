@@ -93,7 +93,7 @@ The image contains a sysusers.d file that lists every user and group created
 in the build, including their fixed UID and GID:
 
 ```text
-/usr/lib/sysusers.d/00-bootc-imagectl.conf
+/usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
 ```
 
 It uses ordinary sysusers.d(5) syntax:
@@ -127,11 +127,11 @@ take precedence over any package's sysusers.d file.
 
 ```mermaid
 flowchart TD
-    A["COPY 00-bootc-imagectl.conf /usr/lib/sysusers.d/"] --> B["RUN systemd-sysusers"]
+    A["COPY 00-bootc-imagectl.lock.conf /usr/lib/sysusers.d/"] --> B["RUN systemd-sysusers"]
     B --> C["RUN apt-get | dnf | pacman install ..."]
     C --> D["COPY system_files/ /"]
     D --> E
-    E["RUN bootc-imagectl finalize<br>--sysusers-lock .../00-bootc-imagectl.conf"]
+    E["RUN bootc-imagectl finalize<br>--sysusers-lock .../00-bootc-imagectl.lock.conf"]
 ```
 
 1. The sysusers lock file is copied in first, and `systemd-sysusers` creates
@@ -159,8 +159,8 @@ GID the parent image published, and add its own as needed.
 The derived build starts with the parent image's sysusers lock file and user
 records. Packages installed in the derived build find base image users through
 nss-systemd and keep them. The derived image adds its own sysusers lock file,
-`01-bootc-imagectl.conf`, and passes its path to `finalize`. The file must sort
-after the parent's, which takes precedence. `finalize` reads the parent's lock
+`01-bootc-imagectl.lock.conf`, and passes its path to `finalize`. The file must
+sort after the parent's, which takes precedence. `finalize` reads the parent's lock
 file like any other sysusers.d file and checks its accounts, but prints missing
 lines in the lock file only for the file given via `--sysusers-lock`.
 

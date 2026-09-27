@@ -17,7 +17,7 @@ pub(crate) struct MovedAccounts {
 }
 
 pub(crate) fn locks_uids(accounts: &MovedAccounts) {
-    assert!(ROOT.exists("usr/lib/sysusers.d/00-bootc-imagectl.conf"));
+    assert!(ROOT.exists("usr/lib/sysusers.d/00-bootc-imagectl.lock.conf"));
     for &(name, uid) in accounts.system_users {
         let found = uzers::get_user_by_name(name).map(|user| user.uid());
         assert_eq!(found, Some(uid), "{name}");
