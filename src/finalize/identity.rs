@@ -1,7 +1,7 @@
 //! Remove machine identity that package postinstalls generate at build time.
 //! The machine identity must instead be generated on first boot.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 use tracing::debug;
@@ -32,17 +32,21 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
         }
     }
 
-    // Unless the container runtime bind-mounted one, which is not part of
-    // the image.
-    if root.symlink_metadata_optional("etc/resolv.conf")?.is_some()
-        && !root
+    let mounted = root.symlink_metadata_optional("etc/resolv.conf")?.is_some()
+        && root
             .as_cap_std()
             .is_mountpoint("etc/resolv.conf")?
-            .unwrap_or_default()
-    {
-        root.remove_file("etc/resolv.conf")
-            .context("removing /etc/resolv.conf")?;
-    }
+            .unwrap_or_default();
+    ensure!(
+        !mounted,
+        "/etc/resolv.conf is mounted by the container runtime and cannot be removed. \
+         help: with podman, run this step with RUN --network=none. With docker  \
+         (where mounting cannot be disabled) make /etc/resolv.conf a symlink in an earlier step, e.g. to \
+         ../run/systemd/resolve/stub-resolv.conf"
+    );
+    // The distribution's resolver creates it at boot.
+    root.remove_file_optional("etc/resolv.conf")
+        .context("removing /etc/resolv.conf")?;
 
     // The fstab packages create at install time is just a placeholder.
     root.remove_file_optional("etc/fstab")?;
@@ -87,6 +91,16 @@ mod tests {
         assert!(root.exists("etc/passwd"));
         assert!(!root.exists("etc/passwd-"));
         assert!(!root.exists("etc/.pwd.lock"));
+        Ok(())
+    }
+
+    #[test]
+    fn removes_resolv_conf_symlink() -> Result<()> {
+        let root = rootfs()?;
+        root.create_dir("etc")?;
+        root.symlink("../run/systemd/resolve/stub-resolv.conf", "etc/resolv.conf")?;
+        finalize(&root, &TestDistro::default())?;
+        assert!(root.symlink_metadata_optional("etc/resolv.conf")?.is_none());
         Ok(())
     }
 
