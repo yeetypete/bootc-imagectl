@@ -45,7 +45,7 @@ RUN systemd-sysusers
 RUN dnf install -y bootc dracut kernel openssh-server
 
 COPY --from=bootc-imagectl /usr/local/cargo/bin/bootc-imagectl /usr/libexec/bootc-imagectl
-RUN /usr/libexec/bootc-imagectl finalize \
+RUN --network=none /usr/libexec/bootc-imagectl finalize \
     --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
 ```
 

@@ -171,25 +171,38 @@ fn links_into_usr(root: &Dir) -> Result<Vec<(Utf8PathBuf, Utf8PathBuf)>> {
     Ok(links)
 }
 
+/// The container runtime mounts some directories which are not removable.
+fn remove_unmounted(dir: &Dir, path: &Utf8Path) -> Result<()> {
+    for entry in dir.entries()? {
+        let entry = entry?;
+        let name = entry.file_name()?;
+        let entry_path = path.join(&name);
+        if dir.as_cap_std().is_mountpoint(&name)?.unwrap_or_default() {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            let subdir = dir.open_dir(&name)?;
+            remove_unmounted(&subdir, &entry_path)?;
+            match dir.remove_dir(&name) {
+                Err(e) if e.kind() == ErrorKind::DirectoryNotEmpty => {}
+                result => result.with_context(|| format!("removing /{entry_path}"))?,
+            }
+        } else {
+            dir.remove_file(&name)
+                .with_context(|| format!("removing /{entry_path}"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Empty /var, /run and /tmp. tmpfiles.d recreates their contents at boot.
 /// Symlinks from /var into /usr are kept.
 fn empty_var(root: &Dir) -> Result<()> {
     debug!("emptying /var, /run and /tmp");
     let links = links_into_usr(root)?;
     for dir in ["run", "tmp"] {
-        let Some(entries) = root.open_dir_optional(dir)? else {
-            continue;
-        };
-        for entry in entries.entries()? {
-            let name = entry?.file_name()?;
-            match entries.remove_all_optional(&name) {
-                // The container runtime bind-mounts files such as
-                // /run/.containerenv and /run/secrets into the build.
-                Err(e) if e.kind() == ErrorKind::ResourceBusy => {}
-                result => {
-                    result.with_context(|| format!("removing /{dir}/{name}"))?;
-                }
-            }
+        if let Some(entries) = root.open_dir_optional(dir)? {
+            remove_unmounted(&entries, Utf8Path::new(dir))?;
         }
     }
 
