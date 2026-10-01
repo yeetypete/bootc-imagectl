@@ -65,12 +65,12 @@ booted, install the image onto a disk with:
 
 ```bash
 curl -fsSL https://github.com/yeetypete/bootc-imagectl/raw/main/install.sh \
-    | sudo bash -s -- --image docker.io/example/my-bootc-image:latest /dev/my-disk
+    | sudo bash -s -- --image docker.io/example/my-bootc-image:latest
 ```
 
-This calls `bootc-imagectl install` with the image reference and the disk to
-install to. Running `bootc upgrade` in the installed system will update it based
-on the image reference it was installed from.
+This calls `bootc-imagectl install` with the image reference, which lists the
+disks and asks which one to install to. Running `bootc upgrade` in the installed
+system will update it based on the image reference it was installed from.
 
 ## First boot
 

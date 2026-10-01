@@ -2,11 +2,11 @@
 # Install a bootc image built with bootc-imagectl onto a disk:
 #
 #     curl -fsSL https://github.com/yeetypete/bootc-imagectl/raw/main/install.sh \
-#         | sudo bash -s -- --image docker.io/example/image:latest /dev/nvme0n1
+#         | sudo bash -s -- --image docker.io/example/image:latest
 set -euo pipefail
 
 usage() {
-    echo "Usage: install.sh --image IMAGE [INSTALL-OPTION]... DEVICE" >&2
+    echo "Usage: install.sh --image IMAGE [INSTALL-OPTION]... [DEVICE]" >&2
     echo "Other options are forwarded to \`bootc-imagectl install\`." >&2
     echo "See \`bootc-imagectl install --help\`." >&2
 }
@@ -38,10 +38,8 @@ main() {
     done
 
     [[ ${EUID} -eq 0 ]] || fatal "must run as root"
-    if [[ -z ${image} || ${#args[@]} -eq 0 ]]; then
+    if [[ -z ${image} ]]; then
         usage
-        echo >&2
-        lsblk --nodeps --output NAME,SIZE,MODEL >&2
         exit 2
     fi
 

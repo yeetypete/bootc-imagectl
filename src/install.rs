@@ -17,6 +17,7 @@ use std::process::Command;
 use anyhow::{Context, Result, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use rustix::mount::{MountFlags, UnmountFlags};
+use serde::Deserialize;
 use tracing::{info, warn};
 
 use crate::cli::{Encrypt, InstallOpts};
@@ -45,7 +46,11 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
         rustix::process::geteuid().is_root(),
         "install must run as root"
     );
-    let device = &opts.device;
+    let device = match &opts.device {
+        Some(device) => device.clone(),
+        None => prompt_disk()?,
+    };
+    let device = &device;
     let metadata = fs::metadata(device).with_context(|| format!("reading {device}"))?;
     ensure!(
         metadata.file_type().is_block_device(),
@@ -157,6 +162,64 @@ fn check_image(encrypt: Encrypt) -> Result<()> {
         "the image lacks systemd-boot's EFI binaries in {SYSTEMD_BOOT_DIR}"
     );
     Ok(())
+}
+
+/// A disk, as reported by `lsblk --json`.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct Disk {
+    path: Utf8PathBuf,
+    size: String,
+    model: Option<String>,
+    #[serde(rename = "rm")]
+    removable: bool,
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+/// The output of `lsblk --json`.
+#[derive(Debug, Deserialize)]
+struct Lsblk {
+    blockdevices: Vec<Disk>,
+}
+
+/// The whole disks in `lsblk --json` output.
+fn disks(lsblk_json: &str) -> Result<Vec<Disk>> {
+    let lsblk: Lsblk = serde_json::from_str(lsblk_json).context("parsing lsblk's output")?;
+    Ok(lsblk
+        .blockdevices
+        .into_iter()
+        .filter(|disk| disk.kind == "disk" && !disk.path.as_str().starts_with("/dev/zram"))
+        .collect())
+}
+
+/// List the disks and ask which one to install to.
+fn prompt_disk() -> Result<Utf8PathBuf> {
+    let output = Command::new("lsblk")
+        .args(["--json", "--nodeps", "--output", "PATH,SIZE,MODEL,RM,TYPE"])
+        .output_string()?;
+    let mut disks = disks(&output)?;
+    ensure!(!disks.is_empty(), "found no disk to install to");
+    println!("Disks:");
+    for (number, disk) in disks.iter().enumerate() {
+        let model = disk.model.as_deref().unwrap_or("");
+        let removable = if disk.removable { " (removable)" } else { "" };
+        println!(
+            "  {}) {}  {}  {model}{removable}",
+            number + 1,
+            disk.path,
+            disk.size
+        );
+    }
+    print!("Disk to install to [1-{}]: ", disks.len());
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    let number: usize = answer.trim().parse().context("not a number")?;
+    ensure!(
+        (1..=disks.len()).contains(&number),
+        "no disk {number} in the list"
+    );
+    Ok(disks.swap_remove(number - 1).path)
 }
 
 /// Show what the install destroys and make the user type the disk's name.
@@ -306,6 +369,23 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "secret");
         let mode = fs::metadata(&path).unwrap().permissions();
         assert_eq!(mode.mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn lists_only_whole_disks() {
+        let output = r#"{"blockdevices": [
+            {"path":"/dev/loop0", "size":"1.2G", "model":null, "rm":false, "type":"loop"},
+            {"path":"/dev/nvme0n1", "size":"1.8T", "model":"Samsung SSD", "rm":false, "type":"disk"},
+            {"path":"/dev/sda", "size":"14.9G", "model":"Flash", "rm":true, "type":"disk"},
+            {"path":"/dev/sr0", "size":"2.6G", "model":"DVD", "rm":true, "type":"rom"},
+            {"path":"/dev/zram0", "size":"4G", "model":null, "rm":false, "type":"disk"}
+        ]}"#;
+        let paths: Vec<_> = disks(output)
+            .unwrap()
+            .into_iter()
+            .map(|disk| disk.path)
+            .collect();
+        assert_eq!(paths, ["/dev/nvme0n1", "/dev/sda"]);
     }
 
     #[test]
