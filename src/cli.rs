@@ -54,8 +54,8 @@ pub struct FinalizeOpts {
 #[derive(Debug, Args)]
 pub struct InstallOpts {
     /// The disk to install to, e.g. /dev/nvme0n1. Every partition on it is
-    /// destroyed.
-    pub device: Utf8PathBuf,
+    /// destroyed. Without it, install lists the disks and asks for one.
+    pub device: Option<Utf8PathBuf>,
 
     /// How to encrypt the root partition.
     #[arg(long, value_enum, default_value_t = Encrypt::Passphrase)]
@@ -79,7 +79,7 @@ pub struct InstallOpts {
     pub target_imgref: Option<String>,
 
     /// Wipe the disk without asking for confirmation.
-    #[arg(long)]
+    #[arg(long, requires = "device")]
     pub yes: bool,
 }
 
