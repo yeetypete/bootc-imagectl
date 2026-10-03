@@ -75,6 +75,10 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
     };
 
     info!("partitioning {device}");
+    // systemd-repart updates the kernel's partitions one by one and fails when
+    // a new partition overlaps an old one it has not updated yet, e.g. a larger
+    // ESP. Without old partitions it only adds new ones.
+    remove_partitions(device)?;
     let definitions = repart::write_definitions(tmp, opts.encrypt)?;
     let partitions = repart::partition(device, &definitions, key_file.as_deref())?;
     wait_for_udev(&partitions.esp)?;
@@ -144,6 +148,7 @@ fn check_image(encrypt: Encrypt) -> Result<()> {
         "mkfs.vfat",
         "systemd-repart",
         "udevadm",
+        "wipefs",
     ];
     if encrypt == Encrypt::Passphrase {
         tools.push("cryptsetup");
@@ -260,6 +265,15 @@ fn write_key_file(dir: &Utf8Path, passphrase: &str) -> Result<Utf8PathBuf> {
         .and_then(|mut file| file.write_all(passphrase.as_bytes()))
         .with_context(|| format!("writing {path}"))?;
     Ok(path)
+}
+
+/// Remove the disk's partitions from the kernel by wiping its partition table.
+fn remove_partitions(device: &Utf8Path) -> Result<()> {
+    // wipefs fails if a partition is in use and rereads the partition table.
+    Command::new("wipefs")
+        .args(["--all", "--quiet"])
+        .arg(device)
+        .run()
 }
 
 /// Wait for udev to process a new partition. bootc reads partition types
