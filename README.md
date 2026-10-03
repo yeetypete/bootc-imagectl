@@ -72,6 +72,9 @@ This calls `bootc-imagectl install` with the image reference, which lists the
 disks and asks which one to install to. Running `bootc upgrade` in the installed
 system will update it based on the image reference it was installed from.
 
+The root filesystem is ext4 by default. Pass `--filesystem btrfs` to use btrfs
+instead. The image must then ship `mkfs.btrfs`, e.g. from `btrfs-progs`.
+
 ## First boot
 
 On first boot, systemd-firstboot will ask for settings the image leaves
