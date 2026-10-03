@@ -20,6 +20,7 @@ mod initramfs;
 mod layout;
 mod lint;
 mod presets;
+mod systemd;
 mod tmpfiles;
 mod var;
 
@@ -33,6 +34,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     let root = Dir::open_ambient_dir("/", ambient_authority()).context("opening /")?;
     let distro = distro::detect(&root).context("detecting the distribution")?;
     info!("finalizing a {} rootfs", distro.name());
+    systemd::check().context("checking the systemd version")?;
 
     accounts::finalize(&root, distro, &opts.sysusers_lock).context("finalizing the accounts")?;
     initramfs::finalize(&root, distro).context("building the initramfs")?;
