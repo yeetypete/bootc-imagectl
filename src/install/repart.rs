@@ -7,7 +7,7 @@ use anyhow::{Context, Result, anyhow};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use serde::Deserialize;
 
-use crate::cli::Encrypt;
+use crate::cli::{Encrypt, Filesystem};
 use crate::command::CommandRunExt;
 
 /// The file name of the ESP's definition.
@@ -30,11 +30,10 @@ SizeMaxBytes=1G
 const ROOT_FILE: &str = "20-root.conf";
 
 /// The root partition's repart.d(5) definition, filling the rest of
-/// the disk. `Encrypt=` is appended.
+/// the disk. `Format=` and `Encrypt=` are appended.
 const ROOT_DEFINITION: &str = "\
 [Partition]
 Type=root
-Format=ext4
 Label=root
 ";
 
@@ -54,7 +53,11 @@ struct Partition {
 }
 
 /// Write the definitions into a new `repart.d` directory in `dir`.
-pub(super) fn write_definitions(dir: &Utf8Path, encrypt: Encrypt) -> Result<Utf8PathBuf> {
+pub(super) fn write_definitions(
+    dir: &Utf8Path,
+    filesystem: Filesystem,
+    encrypt: Encrypt,
+) -> Result<Utf8PathBuf> {
     let definitions = dir.join("repart.d");
     fs::create_dir(&definitions).with_context(|| format!("creating {definitions}"))?;
     // A passphrase reaches systemd-repart as its --key-file. Discard=yes keeps
@@ -63,7 +66,10 @@ pub(super) fn write_definitions(dir: &Utf8Path, encrypt: Encrypt) -> Result<Utf8
         Encrypt::Passphrase => "Encrypt=key-file\nDiscard=yes\n",
         Encrypt::Off => "Encrypt=off\n",
     };
-    let root = format!("{ROOT_DEFINITION}{encryption}");
+    let root = format!(
+        "{ROOT_DEFINITION}Format={}\n{encryption}",
+        filesystem.name()
+    );
     for (name, content) in [(ESP_FILE, ESP_DEFINITION), (ROOT_FILE, root.as_str())] {
         let path = definitions.join(name);
         fs::write(&path, content).with_context(|| format!("writing {path}"))?;
@@ -81,11 +87,12 @@ pub(super) fn partition(
     command
         .arg(format!("--definitions={definitions}"))
         .args(["--empty=force", "--dry-run=no", "--json=short"])
-        // mkfs.ext4 discards the already discarded root partition again, which
-        // is slow on large disks.
+        // mkfs discards the already discarded root partition again, which is
+        // slow on large disks.
         .arg("--discard=no")
         // composefs verifies the deployment with fs-verity, which
-        // systemd-repart does not enable by default.
+        // systemd-repart does not enable on ext4 by default. btrfs always
+        // supports it.
         .env("SYSTEMD_REPART_MKFS_OPTIONS_EXT4", "-O verity")
         .stderr(Stdio::inherit());
     if let Some(key_file) = key_file {
@@ -123,7 +130,7 @@ mod tests {
     fn writes_encrypted_definitions() {
         let dir = tempfile::tempdir().unwrap();
         let dir = Utf8Path::from_path(dir.path()).unwrap();
-        let definitions = write_definitions(dir, Encrypt::Passphrase).unwrap();
+        let definitions = write_definitions(dir, Filesystem::Ext4, Encrypt::Passphrase).unwrap();
         assert!(
             fs::read_to_string(definitions.join("10-esp.conf"))
                 .unwrap()
@@ -134,8 +141,8 @@ mod tests {
             indoc! {"
                 [Partition]
                 Type=root
-                Format=ext4
                 Label=root
+                Format=ext4
                 Encrypt=key-file
                 Discard=yes
             "}
@@ -146,11 +153,23 @@ mod tests {
     fn writes_unencrypted_definitions() {
         let dir = tempfile::tempdir().unwrap();
         let dir = Utf8Path::from_path(dir.path()).unwrap();
-        let definitions = write_definitions(dir, Encrypt::Off).unwrap();
+        let definitions = write_definitions(dir, Filesystem::Ext4, Encrypt::Off).unwrap();
         assert!(
             fs::read_to_string(definitions.join("20-root.conf"))
                 .unwrap()
                 .ends_with("Encrypt=off\n")
+        );
+    }
+
+    #[test]
+    fn writes_btrfs_definitions() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = Utf8Path::from_path(dir.path()).unwrap();
+        let definitions = write_definitions(dir, Filesystem::Btrfs, Encrypt::Off).unwrap();
+        assert!(
+            fs::read_to_string(definitions.join("20-root.conf"))
+                .unwrap()
+                .contains("Format=btrfs\n")
         );
     }
 
