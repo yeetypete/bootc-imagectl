@@ -3,7 +3,7 @@
 //! Runs from the image, as a privileged container with the host's devices:
 //!
 //! ```text
-//! podman run --rm -it --privileged --pid=host --ipc=host \
+//! podman run --rm -it --privileged --pid=host --ipc=host --network=host \
 //!     -v /dev:/dev -v /run/udev:/run/udev:ro \
 //!     -v /var/lib/containers:/var/lib/containers \
 //!     IMAGE /usr/libexec/bootc-imagectl install /dev/nvme0n1
