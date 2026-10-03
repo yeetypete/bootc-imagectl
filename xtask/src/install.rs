@@ -29,6 +29,10 @@ const DISK: &str = "/dev/disk/by-id/virtio-target";
 /// The size of the disk file: 10 GiB.
 const DISK_SIZE: u64 = 10 * 1024 * 1024 * 1024;
 
+/// The environment variable naming the root filesystem to install with.
+/// The tests in the installed system check the root against it.
+const FILESYSTEM_ENV: &str = "BOOTC_IMAGECTL_TEST_FILESYSTEM";
+
 /// The passphrase of the encrypted root.
 const PASSPHRASE: &str = "passphrase";
 
@@ -91,6 +95,11 @@ fn stop_machine() {
         .status();
 }
 
+/// The root filesystem to install with, ext4 unless set otherwise.
+fn filesystem() -> String {
+    env::var(FILESYSTEM_ENV).unwrap_or_else(|_| "ext4".into())
+}
+
 /// Write a file only its owner can read.
 fn write_private(path: &Path, content: &str) -> Result<()> {
     OpenOptions::new()
@@ -108,11 +117,12 @@ fn install(sh: &Shell, image: &str, work: &Path, disk: &Path) -> Result<()> {
     // SELinux. TODO: report upstream and fix.
     let bind = format!("{}:install", work.display());
     let disk = format!("{}:target", disk.display());
+    let filesystem = format!("--filesystem={}", filesystem());
     cmd!(
         sh,
         "bcvk ephemeral run-ssh --rm --name {INSTALLER_CONTAINER} --bind {bind} --mount-disk-file {disk}
             --karg systemd.firstboot=no {image}
-            /usr/libexec/bootc-imagectl install --yes --key-file={WORK}/passphrase
+            /usr/libexec/bootc-imagectl install --yes {filesystem} --key-file={WORK}/passphrase
             --source-imgref=oci:{WORK}/image --target-imgref={image} {DISK}"
     )
     .run()?;
@@ -219,7 +229,12 @@ impl Vm {
         let (options, host) = (&self.ssh_options(), self.ssh_host());
         let test = bound_binary(binary, TARGET)?;
         let term = format!("TERM={}", env::var("TERM").unwrap_or_default());
-        cmd!(sh, "ssh {options...} {host} env {term} {test} {args...}").run()?;
+        let filesystem = format!("{FILESYSTEM_ENV}={}", filesystem());
+        cmd!(
+            sh,
+            "ssh {options...} {host} env {term} {filesystem} {test} {args...}"
+        )
+        .run()?;
         Ok(())
     }
 

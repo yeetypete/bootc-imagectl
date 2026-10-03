@@ -45,6 +45,9 @@ Images are built with Podman by default. `--builder docker` (or
 the builder, such as a cache. `{image}` in an option is automatically
 replaced by the name of the image being built, e.g. `fedora`.
 
+The install tests format the root with ext4. Set
+`BOOTC_IMAGECTL_TEST_FILESYSTEM=btrfs` to install with btrfs instead.
+
 When an install test fails, the logs of the booted system are in
 `target/debug/install`, which contains `console.log`, `vmspawn.log` and
 `journal`. The journal can be read with
