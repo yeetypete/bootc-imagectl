@@ -76,8 +76,9 @@ main() {
 
     prepare_storage
 
+    # `udevadm wait` needs udev's netlink events from the host network.
     exec podman run --rm --interactive --tty \
-        --privileged --pid=host --ipc=host \
+        --privileged --pid=host --ipc=host --network=host \
         --security-opt label=type:unconfined_t \
         --volume /dev:/dev --volume /run/udev:/run/udev:ro \
         --volume "${STORAGE}:${STORAGE}" \
