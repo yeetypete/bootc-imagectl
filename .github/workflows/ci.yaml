@@ -62,7 +62,7 @@ jobs:
         run: just test
 
   test-suite:
-    name: test-${{ matrix.suite }}
+    name: test-${{ matrix.suite }}${{ matrix.suite == 'install' && format('-{0}', matrix.filesystem) || '' }}
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -70,6 +70,11 @@ jobs:
       fail-fast: false
       matrix:
         suite: [container, vm, install]
+        filesystem: [ext4]
+        # Only install formats a root filesystem.
+        include:
+          - suite: install
+            filesystem: btrfs
     env:
       BOOTC_IMAGECTL_BUILDER: docker
       BOOTC_IMAGECTL_BUILD_OPTIONS: >-
@@ -127,13 +132,15 @@ jobs:
           sudo apparmor_parser --replace /etc/apparmor.d/bwrap-userns-restrict
 
       - name: Run ${{ matrix.suite }} tests
+        env:
+          BOOTC_IMAGECTL_TEST_FILESYSTEM: ${{ matrix.filesystem }}
         run: just test-${{ matrix.suite }}
 
       - name: Upload install logs
         if: failure() && matrix.suite == 'install'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: install-logs
+          name: install-logs-${{ matrix.filesystem }}
           path: |
             target/debug/install/console.log
             target/debug/install/vmspawn.log

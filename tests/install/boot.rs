@@ -58,3 +58,14 @@ fn unlocks_encrypted_root() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn formats_root_with_requested_filesystem() -> Result<()> {
+    let expected =
+        std::env::var("BOOTC_IMAGECTL_TEST_FILESYSTEM").unwrap_or_else(|_| "ext4".into());
+    let fstype = Command::new("findmnt")
+        .args(["--noheadings", "--output", "FSTYPE", "/sysroot"])
+        .output_string()?;
+    assert_eq!(fstype.trim(), expected);
+    Ok(())
+}
