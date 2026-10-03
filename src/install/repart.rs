@@ -57,12 +57,13 @@ struct Partition {
 pub(super) fn write_definitions(dir: &Utf8Path, encrypt: Encrypt) -> Result<Utf8PathBuf> {
     let definitions = dir.join("repart.d");
     fs::create_dir(&definitions).with_context(|| format!("creating {definitions}"))?;
-    // A passphrase reaches systemd-repart as its --key-file.
-    let mode = match encrypt {
-        Encrypt::Passphrase => "key-file",
-        Encrypt::Off => "off",
+    // A passphrase reaches systemd-repart as its --key-file. Discard=yes keeps
+    // LUKS allow-discards despite --discard=no.
+    let encryption = match encrypt {
+        Encrypt::Passphrase => "Encrypt=key-file\nDiscard=yes\n",
+        Encrypt::Off => "Encrypt=off\n",
     };
-    let root = format!("{ROOT_DEFINITION}Encrypt={mode}\n");
+    let root = format!("{ROOT_DEFINITION}{encryption}");
     for (name, content) in [(ESP_FILE, ESP_DEFINITION), (ROOT_FILE, root.as_str())] {
         let path = definitions.join(name);
         fs::write(&path, content).with_context(|| format!("writing {path}"))?;
@@ -80,6 +81,9 @@ pub(super) fn partition(
     command
         .arg(format!("--definitions={definitions}"))
         .args(["--empty=force", "--dry-run=no", "--json=short"])
+        // mkfs.ext4 discards the already discarded root partition again, which
+        // is slow on large disks.
+        .arg("--discard=no")
         // composefs verifies the deployment with fs-verity, which
         // systemd-repart does not enable by default.
         .env("SYSTEMD_REPART_MKFS_OPTIONS_EXT4", "-O verity")
@@ -133,6 +137,7 @@ mod tests {
                 Format=ext4
                 Label=root
                 Encrypt=key-file
+                Discard=yes
             "}
         );
     }
