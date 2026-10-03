@@ -57,6 +57,10 @@ pub struct InstallOpts {
     /// destroyed. Without it, install lists the disks and asks for one.
     pub device: Option<Utf8PathBuf>,
 
+    /// The root partition's filesystem.
+    #[arg(long, value_enum, default_value_t = Filesystem::Ext4)]
+    pub filesystem: Filesystem,
+
     /// How to encrypt the root partition.
     #[arg(long, value_enum, default_value_t = Encrypt::Passphrase)]
     pub encrypt: Encrypt,
@@ -81,6 +85,26 @@ pub struct InstallOpts {
     /// Wipe the disk without asking for confirmation.
     #[arg(long, requires = "device")]
     pub yes: bool,
+}
+
+/// The root partition's filesystem. Must support fs-verity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Filesystem {
+    /// Format the root partition with ext4.
+    Ext4,
+    /// Format the root partition with btrfs.
+    Btrfs,
+}
+
+impl Filesystem {
+    /// The filesystem's name, as `mount` and repart.d(5) `Format=` accept it.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Ext4 => "ext4",
+            Self::Btrfs => "btrfs",
+        }
+    }
 }
 
 /// How `install` encrypts the root partition.

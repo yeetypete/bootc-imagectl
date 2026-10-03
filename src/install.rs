@@ -20,7 +20,7 @@ use rustix::mount::{MountFlags, UnmountFlags};
 use serde::Deserialize;
 use tracing::{info, warn};
 
-use crate::cli::{Encrypt, InstallOpts};
+use crate::cli::{Encrypt, Filesystem, InstallOpts};
 use crate::command::CommandRunExt;
 
 mod repart;
@@ -56,7 +56,7 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
         metadata.file_type().is_block_device(),
         "{device} is not a block device"
     );
-    check_image(opts.encrypt)?;
+    check_image(opts.filesystem, opts.encrypt)?;
 
     if !opts.yes {
         confirm(device)?;
@@ -79,7 +79,7 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
     // a new partition overlaps an old one it has not updated yet, e.g. a larger
     // ESP. Without old partitions it only adds new ones.
     remove_partitions(device)?;
-    let definitions = repart::write_definitions(tmp, opts.encrypt)?;
+    let definitions = repart::write_definitions(tmp, opts.filesystem, opts.encrypt)?;
     let partitions = repart::partition(device, &definitions, key_file.as_deref())?;
     wait_for_udev(&partitions.esp)?;
     wait_for_udev(&partitions.root)?;
@@ -89,10 +89,10 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
         .as_deref()
         .map(|key_file| Mapping::open(&partitions.root, key_file))
         .transpose()?;
-    let filesystem = mapping.as_ref().map_or(&partitions.root, |m| &m.device);
+    let root = mapping.as_ref().map_or(&partitions.root, |m| &m.device);
     let target = tmp.join("target");
     fs::create_dir(&target).with_context(|| format!("creating {target}"))?;
-    let _mount = Mount::ext4(filesystem, &target)?;
+    let _mount = Mount::new(root, opts.filesystem, &target)?;
 
     let source_not_in_registry = opts
         .source_imgref
@@ -139,12 +139,13 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
 }
 
 /// Fail if the image lacks tooling install needs.
-fn check_image(encrypt: Encrypt) -> Result<()> {
+fn check_image(filesystem: Filesystem, encrypt: Encrypt) -> Result<()> {
+    let mkfs = format!("mkfs.{}", filesystem.name());
     let mut tools = vec![
         "bootc",
         "bootctl",
         "lsblk",
-        "mkfs.ext4",
+        mkfs.as_str(),
         "mkfs.vfat",
         "systemd-repart",
         "udevadm",
@@ -329,12 +330,12 @@ struct Mount {
 }
 
 impl Mount {
-    /// Mount the ext4 filesystem the root definition formats.
-    fn ext4(device: &Utf8Path, target: &Utf8Path) -> Result<Self> {
+    /// Mount the filesystem the root definition formats.
+    fn new(device: &Utf8Path, filesystem: Filesystem, target: &Utf8Path) -> Result<Self> {
         rustix::mount::mount(
             device.as_str(),
             target.as_str(),
-            "ext4",
+            filesystem.name(),
             MountFlags::empty(),
             None,
         )
@@ -373,6 +374,11 @@ mod tests {
     #[test]
     fn encrypts_by_default() {
         assert_eq!(install_opts(&["/dev/vdb"]).encrypt, Encrypt::Passphrase);
+    }
+
+    #[test]
+    fn formats_ext4_by_default() {
+        assert_eq!(install_opts(&["/dev/vdb"]).filesystem, Filesystem::Ext4);
     }
 
     #[test]
