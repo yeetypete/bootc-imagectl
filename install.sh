@@ -5,6 +5,8 @@
 #         | sudo bash -s -- --image docker.io/example/image:latest
 set -euo pipefail
 
+readonly STORAGE=/var/lib/containers
+
 usage() {
     echo "Usage: install.sh --image IMAGE [INSTALL-OPTION]... [DEVICE]" >&2
     echo "Other options are forwarded to \`bootc-imagectl install\`." >&2
@@ -16,10 +18,19 @@ fatal() {
     exit 1
 }
 
+# WORKAROUND: podman cannot store images on the overlayfs root of live systems, so store the
+# image in memory instead.
+prepare_storage() {
+    mkdir -p "${STORAGE}"
+    [[ $(findmnt --noheadings --output FSTYPE --target "${STORAGE}") == overlay ]] || return 0
+    echo "Storing the image in memory. If it does not fit, mount a disk at ${STORAGE} and run this again."
+    mount -t tmpfs -o size=80%,mode=0700 tmpfs "${STORAGE}"
+}
+
 main() {
     local image=
     local args=()
-    while [[ $# -gt 0 ]]; do
+    while (($#)); do
         case "$1" in
         --image)
             [[ $# -ge 2 ]] || fatal "--image needs a value"
@@ -45,25 +56,31 @@ main() {
 
     { : </dev/tty; } 2>/dev/null || fatal "needs a terminal for interactive prompts"
 
-    if ! command -v podman >/dev/null; then
+    # Debian and Ubuntu ship podman's storage configuration in containers-storage,
+    # which podman only recommends.
+    if ! command -v podman >/dev/null ||
+        [[ ! -e /usr/share/containers/storage.conf && ! -e /etc/containers/storage.conf ]]; then
         echo "Installing podman"
         if command -v apt-get >/dev/null; then
             apt-get update
-            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates podman
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                ca-certificates containers-storage podman
         elif command -v dnf >/dev/null; then
             dnf install -y podman
         elif command -v pacman >/dev/null; then
             pacman -Syu --noconfirm --needed podman
         else
-            fatal "podman is not installed, and there is no apt-get, dnf or pacman to install it"
+            fatal "cannot install podman without apt-get, dnf or pacman"
         fi
     fi
+
+    prepare_storage
 
     exec podman run --rm --interactive --tty \
         --privileged --pid=host --ipc=host \
         --security-opt label=type:unconfined_t \
         --volume /dev:/dev --volume /run/udev:/run/udev:ro \
-        --volume /var/lib/containers:/var/lib/containers \
+        --volume "${STORAGE}:${STORAGE}" \
         "${image}" /usr/libexec/bootc-imagectl install "${args[@]}" </dev/tty
 }
 
