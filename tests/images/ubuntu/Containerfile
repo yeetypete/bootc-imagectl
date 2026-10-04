@@ -106,19 +106,22 @@ RUN bootc container split-kernel-and-rootfs --output /kernel && \
     rm -r /kernel
 
 
-FROM image AS uki
+# Based on rootfs so a cached UKI is only reused with its own rootfs.
+FROM rootfs AS uki
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install --no-install-recommends -y systemd-ukify
 
 # rootfs no longer has the kernel and initramfs, so they come from finalized.
+# The stub comes from rootfs, so the UKI ships the image's own systemd-stub.
 RUN --mount=type=bind,from=rootfs,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
     kver="$(ls /kernel)" && \
     mkdir /uki && \
     bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
-      -- --output "/uki/${kver}.efi"
+      -- --stub /target/usr/lib/systemd/boot/efi/linuxx64.efi.stub \
+      --output "/uki/${kver}.efi"
 
 
 FROM rootfs
