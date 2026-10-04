@@ -28,6 +28,9 @@ mod repart;
 /// Where systemd-boot's EFI binaries are, which bootc installs to the ESP.
 const SYSTEMD_BOOT_DIR: &str = "/usr/lib/systemd/boot/efi";
 
+/// Where the image holds its UKI, which bootc installs to the ESP.
+const UKI_DIR: &str = "/boot/EFI/Linux";
+
 /// The device-mapper name of the unlocked root partition.
 const MAPPING: &str = "bootc-imagectl-root";
 
@@ -113,12 +116,6 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
         "to-filesystem",
         "--composefs-backend",
         "--bootloader=systemd",
-        // An empty --root-mount-spec makes bootc omit the root= karg, so that
-        // systemd-gpt-auto-generator finds the root partition by its type and
-        // unlocks it. Without it, bootc adds root=UUID= of the filesystem
-        // inside the LUKS volume, which does not exist until the volume is
-        // unlocked.
-        "--root-mount-spec=",
     ]);
     if let Some(imgref) = &opts.source_imgref {
         bootc.arg(format!("--source-imgref={imgref}"));
@@ -167,7 +164,26 @@ fn check_image(filesystem: Filesystem, encrypt: Encrypt) -> Result<()> {
         fs::exists(SYSTEMD_BOOT_DIR)?,
         "the image lacks systemd-boot's EFI binaries in {SYSTEMD_BOOT_DIR}"
     );
+    ensure!(
+        has_uki(Utf8Path::new(UKI_DIR))?,
+        "the image has no UKI in {UKI_DIR}. help: build one as described in https://bootc.dev/bootc/bootc-experimental-composefs.7.html#building-sealed-images"
+    );
     Ok(())
+}
+
+/// Whether `dir` holds a UKI.
+fn has_uki(dir: &Utf8Path) -> Result<bool> {
+    let entries = match dir.read_dir_utf8() {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(anyhow::Error::from(e).context(format!("reading {dir}"))),
+    };
+    for entry in entries {
+        if entry?.path().extension() == Some("efi") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// A disk, as reported by `lsblk --json`.
@@ -389,6 +405,18 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "secret");
         let mode = fs::metadata(&path).unwrap().permissions();
         assert_eq!(mode.mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn finds_uki() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = Utf8Path::from_path(dir.path()).unwrap();
+        assert!(!has_uki(&dir.join("missing")).unwrap());
+        assert!(!has_uki(dir).unwrap());
+        fs::write(dir.join("README"), "").unwrap();
+        assert!(!has_uki(dir).unwrap());
+        fs::write(dir.join("6.19.0.efi"), "").unwrap();
+        assert!(has_uki(dir).unwrap());
     }
 
     #[test]
