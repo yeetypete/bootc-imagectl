@@ -1,4 +1,4 @@
-//! Kernel arguments every image needs, which the UKI takes from kargs.d.
+//! Kernel arguments required in all images.
 
 use anyhow::{Context, Result};
 use cap_std_ext::cap_std::fs_utf8::Dir;
