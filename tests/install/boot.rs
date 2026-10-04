@@ -5,6 +5,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
+use rustix::fs::{StatVfsMountFlags, statvfs};
 use serde::Deserialize;
 
 /// The block devices, as reported by `lsblk --json --list`.
@@ -67,5 +68,14 @@ fn formats_root_with_requested_filesystem() -> Result<()> {
         .args(["--noheadings", "--output", "FSTYPE", "/sysroot"])
         .output_string()?;
     assert_eq!(fstype.trim(), expected);
+    Ok(())
+}
+
+#[test]
+fn mounts_etc_and_var_writable() -> Result<()> {
+    for path in ["/etc", "/var"] {
+        let flags = statvfs(path)?.f_flag;
+        assert!(!flags.contains(StatVfsMountFlags::RDONLY), "{path}");
+    }
     Ok(())
 }

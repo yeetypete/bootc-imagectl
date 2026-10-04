@@ -1,4 +1,4 @@
-//! Run tests inside a container of the finalized image.
+//! Run tests inside a container of the image.
 
 mod accounts;
 mod arch;

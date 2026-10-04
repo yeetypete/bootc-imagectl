@@ -12,7 +12,7 @@ use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs::{Dir, MetadataExt};
 use cap_std_ext::cap_std::{ambient_authority, fs_utf8};
 
-/// The root of the finalized image.
+/// The root of the image.
 pub(crate) static ROOT: LazyLock<Dir> =
     LazyLock::new(|| Dir::open_ambient_dir("/", ambient_authority()).expect("opening /"));
 
@@ -31,10 +31,15 @@ pub(crate) fn var_tmpfiles() -> Result<String> {
     Ok(ROOT.read_to_string("usr/lib/tmpfiles.d/bootc-imagectl-var-1.conf")?)
 }
 
+/// The path of the image's UKI.
+fn uki() -> Result<String> {
+    let [name] = names("boot/EFI/Linux")?.try_into().expect("one UKI");
+    Ok(format!("/boot/EFI/Linux/{}", name.display()))
+}
+
+/// The paths in the initramfs the UKI embeds.
 pub(crate) fn initramfs_paths() -> Result<Vec<String>> {
-    let [kver] = names("usr/lib/modules")?.try_into().expect("one kernel");
-    let initramfs = format!("/usr/lib/modules/{}/initramfs.img", kver.display());
-    let listing = Command::new("lsinitrd").arg(&initramfs).output_string()?;
+    let listing = Command::new("lsinitrd").arg(uki()?).output_string()?;
     Ok(listing
         .lines()
         .flat_map(str::split_whitespace)
@@ -56,7 +61,7 @@ fn lays_out_toplevel() -> Result<()> {
     }
     assert!(ROOT.is_dir("sysroot"));
     assert!(ROOT.is_dir("var"));
-    assert!(names("boot/EFI/Linux")?.is_empty());
+    assert!(ROOT.is_dir("boot/EFI/Linux"));
 
     let layout = ROOT.read_to_string("usr/lib/tmpfiles.d/bootc-imagectl-layout.conf")?;
     assert!(
@@ -120,20 +125,14 @@ fn removes_machine_identity() -> Result<()> {
 }
 
 #[test]
-fn stages_kernel() -> Result<()> {
+fn boots_from_uki() -> Result<()> {
     let [kver] = names("usr/lib/modules")?.try_into().expect("one kernel");
-    assert!(ROOT.is_file(format!("usr/lib/modules/{}/vmlinuz", kver.display())));
-    Ok(())
-}
-
-#[test]
-fn builds_initramfs() -> Result<()> {
-    let [kver] = names("usr/lib/modules")?.try_into().expect("one kernel");
-    let modules = format!("usr/lib/modules/{}", kver.display());
+    let kver = kver.display();
+    assert_eq!(uki()?, format!("/boot/EFI/Linux/{kver}.efi"));
+    let modules = format!("usr/lib/modules/{kver}");
     assert!(ROOT.exists(format!("{modules}/modules.dep")));
-    let initramfs = ROOT.metadata(format!("{modules}/initramfs.img"))?;
-    assert!(initramfs.len() > 0);
-    assert_eq!(initramfs.mode() & 0o7777, 0o600);
+    assert!(!ROOT.exists(format!("{modules}/vmlinuz")));
+    assert!(!ROOT.exists(format!("{modules}/initramfs.img")));
     Ok(())
 }
 
