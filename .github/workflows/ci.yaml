@@ -121,11 +121,12 @@ jobs:
             sudo tee /etc/apparmor.d/local/bwrap-userns-restrict
           sudo apparmor_parser --replace /etc/apparmor.d/bwrap-userns-restrict
 
-      - name: Log in to image layer cache
-        env:
-          ACTOR: ${{ github.actor }}
-          TOKEN: ${{ github.token }}
-        run: echo "$TOKEN" | podman login ghcr.io --username "$ACTOR" --password-stdin
+      - name: Log in to GitHub Container Registry
+        uses: redhat-actions/podman-login@50c2d9a331bb67c8fdab99b86455fad05e2e3252 # v2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Run ${{ matrix.suite }} tests
         env:
