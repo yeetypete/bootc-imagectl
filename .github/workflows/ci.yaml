@@ -66,6 +66,7 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -75,11 +76,6 @@ jobs:
         include:
           - suite: install
             filesystem: btrfs
-    env:
-      BOOTC_IMAGECTL_BUILDER: docker
-      BOOTC_IMAGECTL_BUILD_OPTIONS: >-
-        --cache-from=type=gha,scope={image}
-        --cache-to=type=gha,mode=max,scope={image}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,12 +85,6 @@ jobs:
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
       - name: Cache Rust build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      # Exposes the GitHub Actions cache to Buildx.
-      - name: Expose GitHub runtime
-        uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
 
       - name: Install VM tools
         if: matrix.suite != 'container'
@@ -131,9 +121,19 @@ jobs:
             sudo tee /etc/apparmor.d/local/bwrap-userns-restrict
           sudo apparmor_parser --replace /etc/apparmor.d/bwrap-userns-restrict
 
+      - name: Log in to GitHub Container Registry
+        uses: redhat-actions/podman-login@50c2d9a331bb67c8fdab99b86455fad05e2e3252 # v2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
       - name: Run ${{ matrix.suite }} tests
         env:
           BOOTC_IMAGECTL_TEST_FILESYSTEM: ${{ matrix.filesystem }}
+          BOOTC_IMAGECTL_BUILD_OPTIONS: >-
+            --cache-from=ghcr.io/${{ github.repository }}/cache-{image}
+            ${{ github.event.pull_request.head.repo.fork != true && format('--cache-to=ghcr.io/{0}/cache-{{image}}', github.repository) || '' }}
         run: just test-${{ matrix.suite }}
 
       - name: Upload install logs

@@ -39,11 +39,10 @@ The `just test-*` recipes run `cargo xtask test <suite>`. This command builds
 the suite's test binary in the image. Arguments after the suite go to the
 test binary, for example a test name filter.
 
-Images are built with Podman by default. `--builder docker` (or
-`BOOTC_IMAGECTL_BUILDER=docker`) builds them with Docker Buildx instead.
-`--build-option` (or `BOOTC_IMAGECTL_BUILD_OPTIONS`) passes an option to
-the builder, such as a cache. `{image}` in an option is automatically
-replaced by the name of the image being built, e.g. `fedora`.
+Images are built with Podman. `--build-option` (or
+`BOOTC_IMAGECTL_BUILD_OPTIONS`) passes an option to `podman build`, such as a
+cache. `{image}` in an option is automatically replaced by the name of the
+image being built, e.g. `fedora`.
 
 The install tests format the root with ext4. Set
 `BOOTC_IMAGECTL_TEST_FILESYSTEM=btrfs` to install with btrfs instead.

@@ -15,8 +15,7 @@ mod vm;
 /// The repository the test images are tagged under.
 const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 
-/// The environment variables setting `Build`.
-const BUILDER_ENV: &str = "BOOTC_IMAGECTL_BUILDER";
+/// The environment variable setting `Build`.
 const BUILD_OPTIONS_ENV: &str = "BOOTC_IMAGECTL_BUILD_OPTIONS";
 
 #[derive(Debug, Parser)]
@@ -55,13 +54,10 @@ enum Suite {
     Install,
 }
 
-/// How the test images are built. `test` passes these to the runner
+/// How the test images are built. `test` passes this to the runner
 /// through the environment.
 #[derive(Debug, Args)]
 struct Build {
-    /// The builder that builds the test images.
-    #[arg(long, env = BUILDER_ENV, value_enum, default_value_t)]
-    builder: Builder,
     /// An option passed to the builder, such as a cache. `{image}` is
     /// replaced by the image name.
     #[arg(long = "build-option", env = BUILD_OPTIONS_ENV, value_delimiter = ' ', allow_hyphen_values = true)]
@@ -75,42 +71,15 @@ impl Build {
         let options: Vec<String> = self
             .options
             .iter()
+            .filter(|option| !option.is_empty())
             .map(|option| option.replace("{image}", name))
             .collect();
-        match self.builder {
-            Builder::Podman => cmd!(
-                sh,
-                "podman build {options...} --build-context bootc-imagectl={target} --tag {image} {dir}"
-            )
-            .run()?,
-            Builder::Docker => {
-                let containerfile = dir.join("Containerfile");
-                cmd!(
-                    sh,
-                    "docker buildx build --load {options...} --build-context bootc-imagectl={target} --file {containerfile} --tag {image} {dir}"
-                )
-                .run()?;
-                cmd!(sh, "podman pull docker-daemon:{image}").run()?;
-            }
-        }
+        cmd!(
+            sh,
+            "podman build {options...} --build-context bootc-imagectl={target} --tag {image} {dir}"
+        )
+        .run()?;
         Ok(())
-    }
-}
-
-/// A tool that builds the test images.
-#[derive(Debug, Clone, Copy, Default, ValueEnum)]
-enum Builder {
-    #[default]
-    Podman,
-    Docker,
-}
-
-impl Builder {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Podman => "podman",
-            Self::Docker => "docker",
-        }
     }
 }
 
@@ -149,8 +118,7 @@ fn test(sh: &Shell, build: &Build, suite: Suite, args: &[OsString]) -> Result<()
     let mut cargo = cmd!(
         sh,
         "{cargo} test --locked --features {name} --test {name} --config {runner} -- {args...}"
-    )
-    .env(BUILDER_ENV, build.builder.name());
+    );
     // An empty variable would pass an empty option.
     cargo = if build.options.is_empty() {
         cargo.env_remove(BUILD_OPTIONS_ENV)

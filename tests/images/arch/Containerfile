@@ -77,3 +77,33 @@ FROM image AS finalized
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
 RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
+
+
+# The UKI embeds the kernel and initramfs.
+FROM finalized AS rootfs
+
+RUN bootc container split-kernel-and-rootfs --output /kernel && \
+    rm -r /kernel
+
+
+# WORKAROUND: podman < 6.0 (buildah 1.44) leaves bind-mounted stages out of
+# cache keys. Building on rootfs keeps a cached UKI from being reused with a
+# different rootfs.
+FROM rootfs AS uki
+
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -Syu --noconfirm --needed systemd-ukify
+
+# The kernel and initramfs come from finalized, the systemd-stub from rootfs.
+RUN --mount=type=bind,from=rootfs,target=/target \
+    --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
+    kver="$(ls /kernel)" && \
+    mkdir /uki && \
+    bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
+      -- --stub /target/usr/lib/systemd/boot/efi/linuxx64.efi.stub \
+      --output "/uki/${kver}.efi"
+
+
+FROM rootfs
+
+COPY --from=uki /uki/ /boot/EFI/Linux/

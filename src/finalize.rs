@@ -17,6 +17,7 @@ use crate::distro;
 mod accounts;
 mod identity;
 mod initramfs;
+mod kargs;
 mod layout;
 mod lint;
 mod presets;
@@ -40,6 +41,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     initramfs::finalize(&root, distro).context("building the initramfs")?;
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;
+    kargs::finalize(&root).context("writing the kernel arguments")?;
     var::finalize(&root, distro).context("finalizing /var")?;
     presets::finalize(&root).context("recording enabled units in a preset file")?;
 
