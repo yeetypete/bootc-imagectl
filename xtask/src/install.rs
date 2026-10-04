@@ -42,6 +42,9 @@ const BOOT_TIMEOUT: Duration = Duration::from_secs(300);
 /// How long systemd-vmspawn has to stop the VM before its scope is stopped.
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long the installed system has to power off.
+const POWEROFF_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Where the installed system sees the target directory, which holds the
 /// test binary.
 const TARGET: &str = "/run/bootc-imagectl-test";
@@ -74,7 +77,9 @@ pub(crate) fn run(sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> 
     install(sh, image, &work, &disk)?;
     let mut vm = Vm::boot(binary, &work, &disk)?;
     vm.wait_for_ssh(sh)?;
-    vm.run_tests(sh, binary, args)
+    vm.run_tests(sh, binary, args)?;
+    vm.power_off(sh)?;
+    vm.check_console()
 }
 
 /// Remove a leftover installer container and VM.
@@ -175,6 +180,7 @@ impl Vm {
             ))
             .arg(format!("--forward-journal={}", journal.display()))
             .arg("systemd.firstboot=no")
+            .arg("systemd.log_color=0")
             .stdin(Stdio::null())
             .stdout(File::create(work.join("console.log"))?)
             .stderr(File::create(work.join("vmspawn.log"))?)
@@ -238,6 +244,59 @@ impl Vm {
         Ok(())
     }
 
+    /// Power off the installed system and wait for systemd-vmspawn to exit.
+    fn power_off(&mut self, sh: &Shell) -> Result<()> {
+        let (options, host) = (&self.ssh_options(), self.ssh_host());
+        // ssh may lose the connection before systemctl exits.
+        let _ = cmd!(sh, "ssh {options...} {host} systemctl poweroff")
+            .quiet()
+            .ignore_stderr()
+            .run();
+        let start = Instant::now();
+        loop {
+            if let Some(status) = self.vmspawn.try_wait()? {
+                if !status.success() {
+                    bail!(
+                        "systemd-vmspawn exited with {status}, see the logs in {}",
+                        self.work.display()
+                    );
+                }
+                return Ok(());
+            }
+            if start.elapsed() > POWEROFF_TIMEOUT {
+                bail!(
+                    "the installed system did not power off within {POWEROFF_TIMEOUT:?}, see the logs in {}",
+                    self.work.display()
+                );
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+    }
+
+    /// Fail on any unit systemd reported as failed on the console, from the
+    /// initrd to the end of shutdown.
+    fn check_console(&self) -> Result<()> {
+        let path = self.work.join("console.log");
+        let console = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        let console = String::from_utf8_lossy(&console);
+        let bad: Vec<&str> = console
+            .lines()
+            .map(str::trim)
+            .filter(|line| {
+                JobResult::ALL
+                    .iter()
+                    .any(|result| line.contains(result.status()))
+            })
+            .collect();
+        if !bad.is_empty() {
+            bail!(
+                "systemd reported failures on the console:\n{}",
+                bad.join("\n")
+            );
+        }
+        Ok(())
+    }
+
     /// ssh options used to log into the VM.
     fn ssh_options(&self) -> Vec<OsString> {
         let mut options = vec!["-i".into(), self.key.clone().into_os_string()];
@@ -253,6 +312,37 @@ impl Vm {
     }
 }
 
+/// The job results systemd reports as failures.
+#[derive(Debug, Clone, Copy)]
+enum JobResult {
+    Timeout,
+    Failed,
+    Dependency,
+    Assert,
+    Unsupported,
+}
+
+impl JobResult {
+    const ALL: [Self; 5] = [
+        Self::Timeout,
+        Self::Failed,
+        Self::Dependency,
+        Self::Assert,
+        Self::Unsupported,
+    ];
+
+    /// The status systemd prints on the console for the result.
+    fn status(self) -> &'static str {
+        match self {
+            Self::Timeout => "[ TIME ]",
+            Self::Failed => "[FAILED]",
+            Self::Dependency => "[DEPEND]",
+            Self::Assert => "[ASSERT]",
+            Self::Unsupported => "[UNSUPP]",
+        }
+    }
+}
+
 /// A random vsock CID, excluding the reserved CIDs 0 to 2 and `u32::MAX`.
 fn random_cid() -> u32 {
     rand::random_range(3..u32::MAX)
@@ -260,7 +350,9 @@ fn random_cid() -> u32 {
 
 impl Drop for Vm {
     fn drop(&mut self) {
-        let _ = kill_process(Pid::from_child(&self.vmspawn), Signal::TERM);
+        if matches!(self.vmspawn.try_wait(), Ok(None)) {
+            let _ = kill_process(Pid::from_child(&self.vmspawn), Signal::TERM);
+        }
         let start = Instant::now();
         while matches!(self.vmspawn.try_wait(), Ok(None)) && start.elapsed() < STOP_TIMEOUT {
             thread::sleep(Duration::from_millis(100));
