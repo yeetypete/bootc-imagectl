@@ -18,16 +18,15 @@ use super::tmpfiles::{self, Entry};
 use crate::distro::Distro;
 
 /// Each run writes a new `bootc-imagectl-var-N.conf` and leaves earlier
-/// ones alone. Derived images which run `bootc-imagectl finalize` again would
-/// create their own files.
+/// ones alone.
 const GENERATED_PREFIX: &str = "bootc-imagectl-var-";
 
 /// Directories kept in /var after finalize, and their modes. E.g. dracut
 /// refuses to run without a tmpdir.
 const VAR_DIRS: &[(&str, u32)] = &[("var/tmp", 0o1777)];
 
-/// Symlinks systemd recreates at boot, kept so a derived image has them
-/// between finalize and its own package installs.
+/// Symlinks systemd recreates at boot, kept for package installs after
+/// finalize.
 const VAR_LINKS: &[(&str, &str)] = &[("var/run", "../run"), ("var/lock", "../run/lock")];
 
 /// Leaves unmounting /var to systemd-shutdown. journald keeps /var busy until

@@ -102,7 +102,7 @@ mod tests {
         root.create_dir_all(DATABASE)?;
         Fedora.relocate_package_state(&root)?;
 
-        // A second run, e.g. in a derived build, leaves the database alone.
+        // A second run leaves the database alone.
         Fedora.relocate_package_state(&root)?;
         assert!(root.is_dir(DATABASE));
         Ok(())

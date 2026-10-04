@@ -32,7 +32,7 @@ const STATE: [(&str, &str); 6] = [
 ];
 
 /// Directories apt refuses to run without, which finalize recreates in the
-/// emptied /var for derived builds.
+/// emptied /var for package installs after finalize.
 const APT_DIRS: [&str; 1] = ["var/log/apt"];
 
 /// A package's state in the dpkg database.
@@ -305,7 +305,7 @@ mod tests {
         );
         assert!(root.is_file("var/lib/dpkg/status"));
 
-        // A second run, e.g. in a derived build, leaves the moved state alone.
+        // A second run leaves the moved state alone.
         Debian.relocate_package_state(&root)?;
         assert!(root.is_file("var/lib/dpkg/status"));
         Ok(())

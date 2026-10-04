@@ -18,8 +18,7 @@ const MODULES: &str = "usr/lib/modules";
 /// Where packages install their dracut configuration.
 const DRACUT_CONF_DIR: &str = "usr/lib/dracut/dracut.conf.d";
 
-/// The dracut configuration for every initramfs built in the image,
-/// including by derived builds.
+/// The dracut configuration for every initramfs built in the image.
 const DRACUT_CONF: &str = "usr/lib/dracut/dracut.conf.d/10-bootc-imagectl.conf";
 
 /// The kernel the image ships. bootc requires exactly one.

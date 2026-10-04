@@ -58,6 +58,10 @@ add the new user or group to the lock file and rebuild.
 [`tests/images`](tests/images) contains complete, tested images for each supported
 distribution. They may be used as a reference for your own bootc image builds.
 
+> [!NOTE]
+> Derived images, built `FROM` an image that `bootc-imagectl finalize` already
+> processed, are not yet supported.
+
 ## Installing
 
 From a live system, e.g. a USB stick with one of the supported Linux distributions

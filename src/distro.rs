@@ -85,9 +85,8 @@ pub trait Distro: std::fmt::Debug {
     /// Fails if the state is missing or cannot be moved.
     fn relocate_package_state(&self, root: &Dir) -> Result<()>;
 
-    /// Recreate in the emptied /var what the package manager needs in a
-    /// derived build. finalize already keeps the symlinks from /var into
-    /// /usr. Package managers that need nothing else need no implementation.
+    /// Recreate what the package manager needs in the emptied /var to install
+    /// packages after finalize.
     ///
     /// # Errors
     ///
