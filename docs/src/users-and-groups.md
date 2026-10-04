@@ -151,18 +151,18 @@ From then on the sysusers lock file keeps it fixed.
 
 ### Derived images
 
-An author can start from an existing bootc image that `finalize` already
-processed and extend it with more packages, for example create a desktop image
-built on top of a base image. The derived build must preserve every UID and
-GID the parent image published, and add its own as needed.
+Building an image `FROM` an image that `finalize` already processed is a goal,
+but is not supported yet. The following problems need to be solved:
 
-The derived build starts with the parent image's sysusers lock file and user
-records. Packages installed in the derived build find base image users through
-nss-systemd and keep them. The derived image adds its own sysusers lock file,
-`01-bootc-imagectl.lock.conf`, and passes its path to `finalize`. The file must
-sort after the parent's, which takes precedence. `finalize` reads the parent's lock
-file like any other sysusers.d file and checks its accounts, but prints missing
-lines in the lock file only for the file given via `--sysusers-lock`.
+- The parent's users are records in `/usr/lib/userdb`, not entries in
+  `/etc/passwd`. rpm reads `/etc/passwd` directly, so it installs a file the
+  package assigns to one of the parent's users as owned by root instead.
+- dpkg installs such a file with the right owner, but `finalize`'s ownership
+  [check](#checks) fails, because it only looks up the file's owner in
+  `/etc/passwd`.
+- The derived build needs a sysusers lock file of its own, which must not
+  reuse an ID of the parent's, and `finalize` must report missing lines only
+  for that file.
 
 ### Finalize
 
