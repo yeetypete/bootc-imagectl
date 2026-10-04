@@ -34,10 +34,7 @@ is built:
 
 - The image is built with Podman.
 - The image uses bootc's composefs backend and boots with systemd-boot.
-- The image boots from a [UKI](https://uapi-group.org/specifications/specs/unified_kernel_image/)
-  built as described in bootc's guide to
-  [building sealed images](https://bootc.dev/bootc/bootc-experimental-composefs.7.html#building-sealed-images).
-  Kernel arguments come from `/usr/lib/bootc/kargs.d`.
+- The image boots from a [UKI](https://bootc.dev/bootc/bootc-experimental-composefs.7.html#building-sealed-images).
 - Every user and group has a fixed UID and GID from a sysusers lock file.
 
 > [!NOTE]
