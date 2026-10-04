@@ -5,7 +5,7 @@ image from a regular distribution container image, and install it onto a disk.
 
 It runs as the last step of a container build, and turns the root filesystem
 built during a Docker/Podman build into an image that boots with bootc's
-[composefs backend](https://bootc.dev/bootc/experimental-composefs.html).
+[composefs backend](https://bootc.dev/bootc/bootc-experimental-composefs.7.html).
 
 Supported Linux distributions:
 
@@ -27,40 +27,33 @@ root by default. This is meant to be run on a live system, e.g. from a USB
 stick with a live Linux distribution booted. See [Installing](#installing)
 for usage details.
 
-## Building an image
+## Assumptions
 
-```dockerfile
-FROM docker.io/library/rust:1 AS bootc-imagectl
+`bootc-imagectl` makes some opinionated assumptions about how a bootc image
+is built:
 
-RUN cargo install --locked \
-    --git https://github.com/yeetypete/bootc-imagectl bootc-imagectl
-
-FROM registry.fedoraproject.org/fedora:44
-
-# Create all users and groups with a fixed UID and GID set by the lock file.
-RUN dnf install -y systemd
-COPY 00-bootc-imagectl.lock.conf /usr/lib/sysusers.d/
-RUN systemd-sysusers
-
-RUN dnf install -y bootc dracut kernel openssh-server
-
-COPY --from=bootc-imagectl /usr/local/cargo/bin/bootc-imagectl /usr/libexec/bootc-imagectl
-RUN --network=none /usr/libexec/bootc-imagectl finalize \
-    --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
-```
-
-On the first build, `finalize` will fail and print the lines the sysusers lock
-file must contain. Add them to `00-bootc-imagectl.lock.conf`, commit it next to
-the Containerfile, and rebuild. Later builds will fail in the same manner whenever
-a package adds a user or group not fixed in the lock file. This is your signal to
-add the new user or group to the lock file and rebuild.
-
-[`tests/images`](tests/images) contains complete, tested images for each supported
-distribution. They may be used as a reference for your own bootc image builds.
+- The image uses bootc's composefs backend and boots with systemd-boot.
+- The image boots from a [UKI](https://uapi-group.org/specifications/specs/unified_kernel_image/)
+  built as described in bootc's guide to
+  [building sealed images](https://bootc.dev/bootc/bootc-experimental-composefs.7.html#building-sealed-images).
+  Kernel arguments come from `/usr/lib/bootc/kargs.d`.
+- Every user and group has a fixed UID and GID from a sysusers lock file.
 
 > [!NOTE]
 > Derived images, built `FROM` an image that `bootc-imagectl finalize` already
 > processed, are not yet supported.
+
+## Building an image
+
+See [`tests/images/fedora/Containerfile`](tests/images/fedora/Containerfile)
+for a complete example. [`tests/images`](tests/images) has one for each
+supported distribution.
+
+On a first build, `finalize` will fail and print the lines the sysusers lock
+file must contain. Add them to `00-bootc-imagectl.lock.conf`, commit it next to
+the Containerfile, and rebuild. Later builds will fail in the same manner whenever
+a package adds a user or group not fixed in the lock file. This is your signal to
+add the new user or group to the lock file and rebuild.
 
 ## Installing
 
