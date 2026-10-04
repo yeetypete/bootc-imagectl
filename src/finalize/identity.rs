@@ -40,9 +40,7 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
     ensure!(
         !mounted,
         "/etc/resolv.conf is mounted by the container runtime and cannot be removed. \
-         help: with podman, run this step with RUN --network=none. With docker  \
-         (where mounting cannot be disabled) make /etc/resolv.conf a symlink in an earlier step, e.g. to \
-         ../run/systemd/resolve/stub-resolv.conf"
+         help: run this step with RUN --network=none"
     );
     // The distribution's resolver creates it at boot.
     root.remove_file_optional("etc/resolv.conf")

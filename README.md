@@ -4,7 +4,7 @@
 image from a regular distribution container image, and install it onto a disk.
 
 It runs as the last step of a container build, and turns the root filesystem
-built during a Docker/Podman build into an image that boots with bootc's
+built during a Podman build into an image that boots with bootc's
 [composefs backend](https://bootc.dev/bootc/bootc-experimental-composefs.7.html).
 
 Supported Linux distributions:
@@ -32,6 +32,7 @@ for usage details.
 `bootc-imagectl` makes some opinionated assumptions about how a bootc image
 is built:
 
+- The image is built with Podman.
 - The image uses bootc's composefs backend and boots with systemd-boot.
 - The image boots from a [UKI](https://uapi-group.org/specifications/specs/unified_kernel_image/)
   built as described in bootc's guide to
