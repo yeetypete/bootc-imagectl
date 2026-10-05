@@ -21,6 +21,10 @@ test-container *args:
 test-vm *args:
     cargo xtask test vm {{ args }}
 
+# Boot a test image in a VM.
+vm image *args:
+    cargo xtask vm {{ args }} {{ image }}
+
 # Run the install tests.
 test-install *args:
     cargo xtask test install {{ args }}

@@ -57,7 +57,7 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
 
 # A regular user with a password and a group, for the tests of the user
 # records.
-RUN echo 'archie:password' | chpasswd && usermod -aG wheel archie
+RUN echo 'archie:archie' | chpasswd && usermod -aG wheel archie
 
 COPY --from=bootc-builder /out/usr/ /usr/
 
