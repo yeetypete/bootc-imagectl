@@ -1,0 +1,129 @@
+ARG DEBIAN_IMAGE=docker.io/library/debian:forky@sha256:a46c047e81bbede575434a5bd8e94bdeee49a605fc652e1f275fc03c94a4aaea
+
+
+FROM ${DEBIAN_IMAGE} AS system-files
+
+COPY system_files/ /system_files/
+RUN chmod -R go-w /system_files
+
+FROM ${DEBIAN_IMAGE} AS bootc-builder
+
+ARG BOOTC_VERSION=v1.16.10
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
+    build-essential \
+    ca-certificates \
+    cargo \
+    git \
+    go-md2man \
+    libostree-dev \
+    libssl-dev \
+    libzstd-dev \
+    pkg-config \
+    rustc
+
+WORKDIR /bootc
+
+RUN git clone --depth 1 --branch "${BOOTC_VERSION}" https://github.com/bootc-dev/bootc.git .
+
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/bootc/target,sharing=locked \
+    make bin install DESTDIR=/out
+
+
+FROM ${DEBIAN_IMAGE} AS image
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Keep package installs from generating an initramfs.
+ENV INITRD=No
+COPY --from=system-files /system_files/usr/lib/kernel/ /usr/lib/kernel/
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y systemd
+
+# Create every user and group with the UID and GID the sysusers lock file fixes
+# before any package can allocate a different one.
+COPY --from=system-files /system_files/usr/lib/sysusers.d/00-bootc-imagectl.lock.conf /usr/lib/sysusers.d/
+RUN systemd-sysusers
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
+    binutils \
+    btrfs-progs \
+    bubblewrap \
+    cryptsetup-bin \
+    dmsetup \
+    dosfstools \
+    dracut \
+    fdisk \
+    libnss-systemd \
+    linux-image-amd64 \
+    openssh-server \
+    ostree \
+    skopeo \
+    ssl-cert \
+    systemd-boot \
+    systemd-boot-efi \
+    systemd-cryptsetup \
+    systemd-repart \
+    systemd-sysv \
+    zstd
+
+# Bootc links against the installed libostree.
+COPY --from=bootc-builder /out/usr/ /usr/
+RUN ldconfig
+
+# A regular user with a password and a group, for the tests of the user
+# records.
+RUN echo 'debian:debian' | chpasswd
+
+COPY --from=system-files /system_files/ /
+
+RUN systemctl enable systemd-networkd.service ssh.service
+
+LABEL containers.bootc=1
+CMD ["/sbin/init"]
+
+
+FROM image AS finalized
+
+# The xtask passes the directory holding bootc-imagectl as a build context.
+COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
+RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
+
+
+# The UKI embeds the kernel and initramfs.
+FROM finalized AS rootfs
+
+RUN bootc container split-kernel-and-rootfs --output /kernel && \
+    rm -r /kernel
+
+
+# WORKAROUND: podman < 6.0 (buildah 1.44) leaves bind-mounted stages out of
+# cache keys. Building on rootfs keeps a cached UKI from being reused with a
+# different rootfs.
+FROM rootfs AS uki
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y systemd-ukify
+
+# The kernel and initramfs come from finalized, the systemd-stub from rootfs.
+RUN --mount=type=bind,from=rootfs,target=/target \
+    --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
+    kver="$(ls /kernel)" && \
+    mkdir /uki && \
+    bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
+      -- --stub /target/usr/lib/systemd/boot/efi/linuxx64.efi.stub \
+      --output "/uki/${kver}.efi"
+
+
+FROM rootfs
+
+COPY --from=uki /uki/ /boot/EFI/Linux/

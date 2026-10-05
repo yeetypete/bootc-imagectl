@@ -2,6 +2,7 @@
 
 mod accounts;
 mod arch;
+mod debian;
 mod fedora;
 mod finalize;
 mod ubuntu;
