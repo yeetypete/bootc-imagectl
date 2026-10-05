@@ -153,4 +153,4 @@ jobs:
           path: |
             target/debug/install/console.log
             target/debug/install/vmspawn.log
-            target/debug/install/journal
+            target/debug/install/vm.journal

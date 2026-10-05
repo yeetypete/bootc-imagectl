@@ -162,8 +162,8 @@ impl Vm {
                 .with_context(|| format!("removing {}", runtime_dir.display()))?;
         }
         fs::create_dir(&runtime_dir)?;
-        let journal = work.join("journal");
-        fs::create_dir(&journal)?;
+
+        let journal = work.join("vm.journal");
         let cid = random_cid();
         let vmspawn = Command::new("systemd-vmspawn")
             .env("RUNTIME_DIRECTORY", &runtime_dir)
