@@ -40,8 +40,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Keep package installs from generating an initramfs.
 ENV INITRD=No
-COPY --from=system-files /system_files/etc/apt/ /etc/apt/
-COPY --from=system-files /system_files/etc/initramfs-tools/ /etc/initramfs-tools/
 COPY --from=system-files /system_files/usr/lib/kernel/ /usr/lib/kernel/
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
