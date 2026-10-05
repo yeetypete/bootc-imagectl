@@ -9,7 +9,7 @@ const ARCHIE: MovedUser = MovedUser {
     name: "archie",
     uid: 1000,
     group: "wheel",
-    password: "password",
+    password: "archie",
     system_user: ("avahi", 969),
 };
 
