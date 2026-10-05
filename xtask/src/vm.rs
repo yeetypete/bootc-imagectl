@@ -2,8 +2,9 @@
 
 use std::ffi::OsString;
 use std::path::Path;
+use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{Context, Result, ensure};
 use xshell::{Shell, cmd};
 
 use crate::{bound_binary, target_dir};
@@ -22,5 +23,25 @@ pub(crate) fn run(sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> 
         "bcvk ephemeral run-ssh --rm --bind {bind} --karg systemd.firstboot=no {image} {test} {args...}"
     )
     .run()?;
+    Ok(())
+}
+
+/// Boot the image in a VM with its console on this terminal. The VM is
+/// removed when it powers off.
+pub(crate) fn boot(image: &str) -> Result<()> {
+    // xshell would connect stdin to /dev/null.
+    let status = Command::new("bcvk")
+        .args([
+            "ephemeral",
+            "run",
+            "--rm",
+            "--interactive",
+            "--tty",
+            "--console",
+        ])
+        .arg(image)
+        .status()
+        .context("running bcvk")?;
+    ensure!(status.success(), "bcvk failed: {status}");
     Ok(())
 }

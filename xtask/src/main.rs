@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, ValueEnum};
 use xshell::{Shell, cmd};
 
@@ -28,6 +28,14 @@ enum Task {
         /// Arguments for the test binary.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<OsString>,
+    },
+    /// Build a test image and boot it in a VM with its console on this
+    /// terminal.
+    Vm {
+        #[command(flatten)]
+        build: Build,
+        /// The image's name, e.g. `ubuntu`.
+        image: String,
     },
     /// Run a test binary against each image in tests/images. Cargo runs
     /// this through `test`.
@@ -97,6 +105,7 @@ fn main() -> Result<()> {
     let sh = Shell::new()?;
     match Task::parse() {
         Task::Test { build, suite, args } => test(&sh, &build, suite, &args),
+        Task::Vm { build, image } => boot(&sh, &build, &image),
         Task::Runner {
             build,
             suite,
@@ -177,6 +186,26 @@ fn run(sh: &Shell, build: &Build, suite: Suite, binary: &Path, args: &[OsString]
         run(sh, &image, binary, &args)?;
     }
     Ok(())
+}
+
+/// Build bootc-imagectl and the image `name`, then boot it in a VM.
+fn boot(sh: &Shell, build: &Build, name: &str) -> Result<()> {
+    let images = images_dir()?;
+    let names = image_names(&images)?;
+    if !names.iter().any(|other| other == name) {
+        bail!(
+            "no image is named {name}, select one of: {}",
+            names.join(", ")
+        );
+    }
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    cmd!(sh, "{cargo} build --locked --bin bootc-imagectl").run()?;
+    // cargo builds bootc-imagectl next to this binary.
+    let xtask = std::env::current_exe()?;
+    let target = xtask.parent().context("finding the target directory")?;
+    let image = format!("{REPOSITORY}:{name}");
+    build.build(sh, name, &image, &images.join(name), target)?;
+    vm::boot(&image)
 }
 
 /// The target profile directory holding `binary` and bootc-imagectl.
