@@ -32,8 +32,9 @@ distribution in [`tests/images`](tests/images):
 
 The `just test-*` recipes run `cargo xtask test <suite>`. This command builds
 `bootc-imagectl` from the working tree, builds each image with it, then runs
-the suite's test binary in the image. Arguments after the suite go to the
-test binary, for example a test name filter.
+the suite's test binary in the image. `--image <name>` limits the run to
+one image, e.g. `just test-vm --image fedora`. Other arguments after the
+suite go to the test binary, for example a test name filter.
 
 Images are built with Podman. `--build-option` (or
 `BOOTC_IMAGECTL_BUILD_OPTIONS`) passes an option to `podman build`, such as a

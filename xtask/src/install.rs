@@ -30,8 +30,10 @@ const DISK: &str = "/dev/disk/by-id/virtio-target";
 const DISK_SIZE: u64 = 10 * 1024 * 1024 * 1024;
 
 /// The environment variable naming the root filesystem to install with.
-/// The tests in the installed system check the root against it.
-const FILESYSTEM_ENV: &str = "BOOTC_IMAGECTL_TEST_FILESYSTEM";
+pub(crate) const FILESYSTEM_ENV: &str = "BOOTC_IMAGECTL_TEST_FILESYSTEM";
+
+/// The root filesystems CI installs with. The first is the default.
+pub(crate) const FILESYSTEMS: [&str; 2] = ["ext4", "btrfs"];
 
 /// The passphrase of the encrypted root.
 const PASSPHRASE: &str = "passphrase";
@@ -100,9 +102,9 @@ fn stop_machine() {
         .status();
 }
 
-/// The root filesystem to install with, ext4 unless set otherwise.
+/// The root filesystem to install with.
 fn filesystem() -> String {
-    env::var(FILESYSTEM_ENV).unwrap_or_else(|_| "ext4".into())
+    env::var(FILESYSTEM_ENV).unwrap_or_else(|_| FILESYSTEMS[0].into())
 }
 
 /// Write a file only its owner can read.

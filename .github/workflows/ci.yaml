@@ -61,21 +61,39 @@ jobs:
       - name: Run unit tests
         run: just test
 
+  matrix:
+    name: matrix
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Generate the test matrix
+        id: matrix
+        run: |
+          {
+            echo 'matrix<<EOF'
+            cargo xtask matrix
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
   test-suite:
-    name: test-${{ matrix.suite }}${{ matrix.suite == 'install' && format('-{0}', matrix.filesystem) || '' }}
+    needs: matrix
+    name: ${{ matrix.name }}
     runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
-      matrix:
-        suite: [container, vm, install]
-        filesystem: [ext4]
-        # Only install formats a root filesystem.
-        include:
-          - suite: install
-            filesystem: btrfs
+      matrix: ${{ fromJSON(needs.matrix.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -119,19 +137,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Run ${{ matrix.suite }} tests
+      - name: Run ${{ matrix.suite }} tests on ${{ matrix.image }}
         env:
           BOOTC_IMAGECTL_TEST_FILESYSTEM: ${{ matrix.filesystem }}
           BOOTC_IMAGECTL_BUILD_OPTIONS: >-
             --cache-from=ghcr.io/${{ github.repository }}/cache-{image}
             ${{ github.event.pull_request.head.repo.fork != true && format('--cache-to=ghcr.io/{0}/cache-{{image}}', github.repository) || '' }}
-        run: just test-${{ matrix.suite }}
+        run: just test-${{ matrix.suite }} --image ${{ matrix.image }}
 
       - name: Upload install logs
         if: failure() && matrix.suite == 'install'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: install-logs-${{ matrix.filesystem }}
+          name: ${{ matrix.name }}-logs
           path: |
             target/debug/install/console.log
             target/debug/install/vmspawn.log
