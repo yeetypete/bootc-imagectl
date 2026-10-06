@@ -3,6 +3,7 @@
 use anyhow::Result;
 
 use crate::accounts::{self, MovedUser};
+use crate::units;
 
 /// The base image's regular user.
 const UBUNTU: MovedUser = MovedUser {
@@ -26,4 +27,9 @@ fn accepts_password_of_moved_user() -> Result<()> {
 #[test]
 fn sysusers_changes_nothing_at_boot() -> Result<()> {
     accounts::sysusers_changed_nothing(&UBUNTU)
+}
+
+#[test]
+fn keeps_enabled_units_after_first_boot() -> Result<()> {
+    units::are_enabled(&["systemd-networkd.service", "ssh.service"])
 }
