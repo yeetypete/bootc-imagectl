@@ -45,8 +45,8 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman-key --init && pacman-key --populate archlinux && \
     pacman -Syu --noconfirm --needed \
     base \
+    binutils \
     btrfs-progs \
-    bubblewrap \
     dosfstools \
     dracut \
     linux \
