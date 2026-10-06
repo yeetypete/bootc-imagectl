@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, ValueEnum};
+use serde_json::{Value, json};
 use xshell::{Shell, cmd};
 
 mod container;
@@ -24,6 +25,8 @@ enum Task {
     Test {
         #[command(flatten)]
         build: Build,
+        #[command(flatten)]
+        selection: Selection,
         suite: Suite,
         /// Arguments for the test binary.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -37,12 +40,16 @@ enum Task {
         /// The image's name, e.g. `ubuntu`.
         image: String,
     },
+    /// Print the matrix of test jobs as JSON, consumable by GitHub Actions.
+    Matrix,
     /// Run a test binary against each image in tests/images. Cargo runs
     /// this through `test`.
     #[command(hide = true)]
     Runner {
         #[command(flatten)]
         build: Build,
+        #[command(flatten)]
+        selection: Selection,
         suite: Suite,
         binary: PathBuf,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -70,6 +77,15 @@ struct Build {
     /// replaced by the image name.
     #[arg(long = "build-option", env = BUILD_OPTIONS_ENV, value_delimiter = ' ', allow_hyphen_values = true)]
     options: Vec<String>,
+}
+
+/// Which images in tests/images the tests run against.
+#[derive(Debug, Args)]
+struct Selection {
+    /// Only run against this image, e.g. `fedora`. May be repeated.
+    /// Defaults to every image.
+    #[arg(long = "image")]
+    images: Vec<String>,
 }
 
 impl Build {
@@ -104,25 +120,77 @@ impl Suite {
 fn main() -> Result<()> {
     let sh = Shell::new()?;
     match Task::parse() {
-        Task::Test { build, suite, args } => test(&sh, &build, suite, &args),
+        Task::Test {
+            build,
+            selection,
+            suite,
+            args,
+        } => test(&sh, &build, &selection, suite, &args),
         Task::Vm { build, image } => boot(&sh, &build, &image),
+        Task::Matrix => {
+            println!("{}", serde_json::to_string_pretty(&matrix()?)?);
+            Ok(())
+        }
         Task::Runner {
             build,
+            selection,
             suite,
             binary,
             args,
-        } => run(&sh, &build, suite, &binary, &args),
+        } => run(&sh, &build, &selection, suite, &binary, &args),
     }
 }
 
+/// The GitHub Actions matrix of test jobs.
+fn matrix() -> Result<Value> {
+    let names = image_names(&images_dir()?)?;
+    let mut jobs = Vec::new();
+    for suite in Suite::value_variants() {
+        for image in &names {
+            let name = format!("test-{}-{image}", suite.name());
+            match suite {
+                Suite::Install => jobs.extend(install::FILESYSTEMS.map(|filesystem| {
+                    json!({
+                        "name": format!("{name}-{filesystem}"),
+                        "suite": suite.name(),
+                        "image": image,
+                        "filesystem": filesystem,
+                    })
+                })),
+                Suite::Container | Suite::Vm => jobs.push(json!({
+                    "name": name,
+                    "suite": suite.name(),
+                    "image": image,
+                })),
+            }
+        }
+    }
+    Ok(json!({ "include": jobs }))
+}
+
 /// Run `cargo test` for the suite with this binary as the runner.
-fn test(sh: &Shell, build: &Build, suite: Suite, args: &[OsString]) -> Result<()> {
+fn test(
+    sh: &Shell,
+    build: &Build,
+    selection: &Selection,
+    suite: Suite,
+    args: &[OsString],
+) -> Result<()> {
+    let names = image_names(&images_dir()?)?;
+    for name in &selection.images {
+        check_image(&names, name)?;
+    }
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let name = suite.name();
     let xtask = std::env::current_exe()?;
+    let mut runner = vec![xtask.display().to_string(), "runner".into()];
+    for image in &selection.images {
+        runner.extend(["--image".into(), image.clone()]);
+    }
+    runner.push(name.into());
     let runner = format!(
-        "target.'cfg(unix)'.runner=['{}', 'runner', '{name}']",
-        xtask.display()
+        "target.'cfg(unix)'.runner={}",
+        serde_json::to_string(&runner)?
     );
     let mut cargo = cmd!(
         sh,
@@ -156,10 +224,28 @@ fn image_names(images: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
-/// Build each image in tests/images and run the test binary against it.
-/// The tests of the other images live in modules named after them and are
-/// skipped.
-fn run(sh: &Shell, build: &Build, suite: Suite, binary: &Path, args: &[OsString]) -> Result<()> {
+/// Fail unless `name` is one of the image `names`.
+fn check_image(names: &[String], name: &str) -> Result<()> {
+    if !names.iter().any(|other| other == name) {
+        bail!(
+            "no image is named {name}, select one of: {}",
+            names.join(", ")
+        );
+    }
+    Ok(())
+}
+
+/// Build each selected image in tests/images and run the test binary
+/// against it. The tests of the other images live in modules named after
+/// them and are skipped.
+fn run(
+    sh: &Shell,
+    build: &Build,
+    selection: &Selection,
+    suite: Suite,
+    binary: &Path,
+    args: &[OsString],
+) -> Result<()> {
     let images = images_dir()?;
     let names = image_names(&images)?;
     let run = match suite {
@@ -167,7 +253,10 @@ fn run(sh: &Shell, build: &Build, suite: Suite, binary: &Path, args: &[OsString]
         Suite::Vm => vm::run,
         Suite::Install => install::run,
     };
-    for name in &names {
+    let selected = names
+        .iter()
+        .filter(|name| selection.images.is_empty() || selection.images.contains(name));
+    for name in selected {
         let image = format!("{REPOSITORY}:{name}");
         let dir = images.join(name);
         let target = target_dir(binary)?;
@@ -191,13 +280,7 @@ fn run(sh: &Shell, build: &Build, suite: Suite, binary: &Path, args: &[OsString]
 /// Build bootc-imagectl and the image `name`, then boot it in a VM.
 fn boot(sh: &Shell, build: &Build, name: &str) -> Result<()> {
     let images = images_dir()?;
-    let names = image_names(&images)?;
-    if !names.iter().any(|other| other == name) {
-        bail!(
-            "no image is named {name}, select one of: {}",
-            names.join(", ")
-        );
-    }
+    check_image(&image_names(&images)?, name)?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     cmd!(sh, "{cargo} build --locked --bin bootc-imagectl").run()?;
     // cargo builds bootc-imagectl next to this binary.

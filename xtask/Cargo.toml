@@ -9,6 +9,7 @@ anyhow = { workspace = true }
 clap = { workspace = true, features = ["env"] }
 rand = "0.10"
 rustix = { version = "1", features = ["process"] }
+serde_json = { workspace = true }
 xshell = { workspace = true }
 
 [lints]
