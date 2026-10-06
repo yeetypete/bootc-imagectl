@@ -89,8 +89,8 @@ jobs:
       - name: Install VM tools
         if: matrix.suite != 'container'
         env:
-          BCVK_VERSION: 0.19.0
-          BCVK_SHA256: e6e3e2e8c13546d30481b035217442de78f2efe3e5a3bd3dbfb58d38345b4b98
+          BCVK_VERSION: 0.21.0
+          BCVK_SHA256: 3135cc59b8971193b49be6cbaee12b789391ac6e6ab5ed3edf17082b03f144dd
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y qemu-system-x86 \
@@ -111,15 +111,6 @@ jobs:
             sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm --name-match=vhost-vsock
-
-      # Ubuntu's AppArmor drops all capabilities from programs run by bwrap,
-      # but bcvk's VM needs them.
-      - name: Allow capabilities under bwrap
-        if: matrix.suite != 'container'
-        run: |
-          printf '%s\n' 'priority=100 allow file rwlkm /**,' 'priority=100 allow ix /**,' |
-            sudo tee /etc/apparmor.d/local/bwrap-userns-restrict
-          sudo apparmor_parser --replace /etc/apparmor.d/bwrap-userns-restrict
 
       - name: Log in to GitHub Container Registry
         uses: redhat-actions/podman-login@50c2d9a331bb67c8fdab99b86455fad05e2e3252 # v2.0
