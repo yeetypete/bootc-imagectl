@@ -29,10 +29,6 @@ distribution in [`tests/images`](tests/images):
 > [!NOTE]
 > Access to `/dev/kvm` and `/dev/vhost-vsock` usually comes with membership in
 > the `kvm` group.
->
-> On Ubuntu, bcvk also needs the AppArmor profile of `bwrap` to let the
-> programs it runs keep their capabilities, as set up in
-> [the CI workflow](.github/workflows/ci.yaml).
 
 The `just test-*` recipes run `cargo xtask test <suite>`. This command builds
 `bootc-imagectl` from the working tree, builds each image with it, then runs
