@@ -1,12 +1,12 @@
-ARG UBUNTU_IMAGE=docker.io/library/ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
+ARG DEBIAN_IMAGE=docker.io/library/debian:forky@sha256:a46c047e81bbede575434a5bd8e94bdeee49a605fc652e1f275fc03c94a4aaea
 
 
-FROM ${UBUNTU_IMAGE} AS system-files
+FROM ${DEBIAN_IMAGE} AS system-files
 
 COPY system_files/ /system_files/
 RUN chmod -R go-w /system_files
 
-FROM ${UBUNTU_IMAGE} AS bootc-builder
+FROM ${DEBIAN_IMAGE} AS bootc-builder
 
 ARG BOOTC_VERSION=v1.16.10
 ENV DEBIAN_FRONTEND=noninteractive
@@ -34,7 +34,7 @@ RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
     make bin install DESTDIR=/out
 
 
-FROM ${UBUNTU_IMAGE} AS image
+FROM ${DEBIAN_IMAGE} AS image
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -62,7 +62,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     dracut \
     fdisk \
     libnss-systemd \
-    linux-image-virtual \
+    linux-image-amd64 \
+    openssh-client \
     openssh-server \
     ostree \
     skopeo \
@@ -78,8 +79,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY --from=bootc-builder /out/usr/ /usr/
 RUN ldconfig
 
-# The base image's user, with a password, for the tests of the user records.
-RUN echo 'ubuntu:ubuntu' | chpasswd
+# A regular user with a password and a group, for the tests of the user
+# records.
+RUN echo 'debian:debian' | chpasswd
 
 COPY --from=system-files /system_files/ /
 

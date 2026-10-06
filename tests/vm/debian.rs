@@ -1,32 +1,32 @@
-//! Check the booted Ubuntu image.
+//! Check the booted Debian image.
 
 use anyhow::Result;
 
 use crate::accounts::{self, MovedUser};
 use crate::units;
 
-/// The base image's regular user.
-const UBUNTU: MovedUser = MovedUser {
-    name: "ubuntu",
+/// The image's regular user.
+const DEBIAN: MovedUser = MovedUser {
+    name: "debian",
     uid: 1000,
     group: "sudo",
-    password: "ubuntu",
-    system_user: ("sshd", 992),
+    password: "debian",
+    system_user: ("sshd", 990),
 };
 
 #[test]
 fn resolves_moved_users_through_nss() -> Result<()> {
-    accounts::resolves_through_nss(&UBUNTU)
+    accounts::resolves_through_nss(&DEBIAN)
 }
 
 #[test]
 fn accepts_password_of_moved_user() -> Result<()> {
-    accounts::accepts_password(&UBUNTU)
+    accounts::accepts_password(&DEBIAN)
 }
 
 #[test]
 fn keeps_account_files_unchanged_after_first_boot() -> Result<()> {
-    accounts::account_files_unchanged(&UBUNTU)
+    accounts::account_files_unchanged(&DEBIAN)
 }
 
 #[test]

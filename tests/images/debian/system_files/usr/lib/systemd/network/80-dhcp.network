@@ -1,0 +1,6 @@
+# An address from DHCP on any wired interface, for ssh into the VM tests.
+[Match]
+Type=ether
+
+[Network]
+DHCP=yes

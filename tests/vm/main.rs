@@ -3,5 +3,7 @@
 mod accounts;
 mod arch;
 mod boot;
+mod debian;
 mod fedora;
 mod ubuntu;
+mod units;

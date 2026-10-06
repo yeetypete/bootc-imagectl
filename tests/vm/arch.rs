@@ -3,6 +3,7 @@
 use anyhow::Result;
 
 use crate::accounts::{self, MovedUser};
+use crate::units;
 
 /// The base image's regular user.
 const ARCHIE: MovedUser = MovedUser {
@@ -24,6 +25,15 @@ fn accepts_password_of_moved_user() -> Result<()> {
 }
 
 #[test]
-fn sysusers_changes_nothing_at_boot() -> Result<()> {
-    accounts::sysusers_changed_nothing(&ARCHIE)
+fn keeps_account_files_unchanged_after_first_boot() -> Result<()> {
+    accounts::account_files_unchanged(&ARCHIE)
+}
+
+#[test]
+fn keeps_enabled_units_after_first_boot() -> Result<()> {
+    units::are_enabled(&[
+        "systemd-networkd.service",
+        "sshd.service",
+        "remote-fs.target",
+    ])
 }

@@ -3,6 +3,7 @@
 
 mod arch;
 mod boot;
+mod debian;
 mod fedora;
 mod status;
 mod ubuntu;
