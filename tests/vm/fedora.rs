@@ -25,8 +25,8 @@ fn accepts_password_of_moved_user() -> Result<()> {
 }
 
 #[test]
-fn sysusers_changes_nothing_at_boot() -> Result<()> {
-    accounts::sysusers_changed_nothing(&FEDORA)
+fn keeps_account_files_unchanged_after_first_boot() -> Result<()> {
+    accounts::account_files_unchanged(&FEDORA)
 }
 
 #[test]
