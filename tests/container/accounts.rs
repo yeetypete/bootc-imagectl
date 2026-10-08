@@ -24,6 +24,18 @@ pub(crate) fn locks_uids(accounts: &MovedAccounts) {
     }
 }
 
+/// The user of a removed package keeps its UID and the GID of its group,
+/// locked.
+pub(crate) fn keeps_removed_accounts_locked() -> Result<()> {
+    let user = uzers::get_user_by_name("removed").expect("the user resolves through NSS");
+    assert_eq!(user.uid(), 850);
+    let group = uzers::get_group_by_gid(850).expect("the group resolves through NSS");
+    assert_eq!(group.name(), "removed");
+    let record = ROOT.read_to_string("usr/lib/userdb/removed.user")?;
+    assert!(record.contains("\"locked\": true"), "{record}");
+    Ok(())
+}
+
 /// /etc/passwd and /etc/shadow keep only root and nobody, while the moved
 /// users still resolve through NSS with their groups.
 pub(crate) fn moves_users_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
