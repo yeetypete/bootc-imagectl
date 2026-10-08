@@ -11,7 +11,7 @@ use cap_std_ext::cap_std::{ambient_authority, fs_utf8};
 #[test]
 fn boots_to_running() -> Result<()> {
     let state = Command::new("systemctl")
-        .arg("is-system-running")
+        .args(["is-system-running", "--wait"])
         .output_string()?;
     assert_eq!(state.trim(), "running");
     Ok(())

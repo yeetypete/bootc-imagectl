@@ -23,8 +23,9 @@ struct Device {
 
 #[test]
 fn boots_to_running() -> Result<()> {
+    // sshd accepts root before the boot finishes.
     let state = Command::new("systemctl")
-        .arg("is-system-running")
+        .args(["is-system-running", "--wait"])
         .output_string()?;
     assert_eq!(state.trim(), "running");
     Ok(())

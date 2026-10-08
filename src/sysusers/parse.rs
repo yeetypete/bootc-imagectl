@@ -169,7 +169,7 @@ impl Membership {
 fn parse_range(fields: &Fields<'_>) -> Result<RangeInclusive<u32>> {
     fields.ensure_user_fields_unset()?;
     if let Some(name) = fields.name {
-        bail!("r lines take no name, got {name:?}");
+        bail!("r lines cannot have a name, got {name:?}");
     }
     let field = fields.id.context("missing range")?;
     let (first, last) = field.split_once('-').unwrap_or((field, field));
@@ -353,7 +353,7 @@ mod tests {
             ("g! foo\n", "! modifier"),
             ("g foo - \"gecos\"\n", "only u lines take a GECOS"),
             ("m foo\n", "missing group name"),
-            ("r foo 500-600\n", "take no name"),
+            ("r foo 500-600\n", "cannot have a name"),
             ("r -\n", "missing range"),
             ("r - 900-500\n", "not a range"),
             ("u 1foo -\n", "does not start with a letter"),

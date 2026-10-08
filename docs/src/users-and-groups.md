@@ -41,8 +41,10 @@ This creates the following problems:
   a package creates a user or group not present in sysusers.d.
 - Users are stored as user records under `/usr/lib/userdb`, with a
   membership file for each group they belong to, as nss-systemd requires.
-  `/usr` is tracked in the bootc image, so a user removed from the image is
-  removed from the system on upgrade.
+  `/usr` is tracked in the bootc image, so the records on a system follow the
+  image on upgrade.
+- The accounts of a removed package stay in the image, locked, so that no
+  later account takes their IDs.
 - Groups and their member lists stay in `/etc/group`, where
   `systemd-sysusers` maintains them at boot and an administrator or an
   installer can still add users to them.
@@ -51,7 +53,9 @@ This creates the following problems:
 
 - A UID or GID published in an image never changes in later builds, whatever
   packages are added, removed or reordered.
-- A user dropped from an image is gone from the system after an upgrade.
+- A UID or GID is never given to another account once its account is
+  removed, and a removed user cannot log in.
+- An account dropped from an image is gone from the system after an upgrade.
 - The image author does not need to manually select UIDs or GIDs. On the
   first build, `bootc-imagectl finalize` reports the lines the sysusers lock
   file must contain.
@@ -117,6 +121,20 @@ owner. Debian has not fully adopted sysusers.d, and accounts are typically
 created in a maintainer script with `adduser --system`. For these accounts
 `finalize` prints the block with the package name blank and the author must
 fill it in.
+
+When a package is removed, it becomes a `# removed: <name>` block:
+
+```text
+# removed: geoclue-2.0
+u geoclue 107 - /var/lib/geoclue /usr/sbin/nologin
+```
+
+The image keeps creating the accounts, with their IDs, so no other account
+can take them. `finalize` locks their user records.
+
+Accounts are kept because an upgrade does not remove state left behind
+by a removed account, e.g. under persistant `/var`. If a package returns,
+the stale entry check requires changing the header back to `# package: <name>`.
 
 This file is an image's sysusers lock file. `bootc-imagectl finalize` takes
 its path with `--sysusers-lock`, prints its contents at the end of the build,
@@ -211,8 +229,8 @@ It performs the following steps:
 | Change in the image | System after upgrade |
 | --- | --- |
 | Package added | Its record and membership files are part of the new `/usr`. `systemd-sysusers` creates its group and memberships in `/etc/group` at boot. |
-| Package removed, its lines are removed from the sysusers lock file | Its record and membership files are gone with `/usr`. Its group and member list stay in `/etc/group`. |
-| Package removed, its are lines kept in the sysusers lock file | The build fails the [stale entry check](#checks). No upgrade can occur. |
+| Package removed, its block marked `# removed:` in the sysusers lock file | Its users stay, locked, with their IDs. |
+| Package removed, its block kept in the sysusers lock file | The build fails the [stale entry check](#checks). No upgrade can occur. |
 | Packages reordered | No change. Every UID and GID is locked by the sysusers lock file. |
 | Switched to another image built from the same sysusers lock file | Same UIDs and GIDs. Records follow the new image. |
 | Rolled back to an earlier image | Same UIDs and GIDs. Files under `/var` keep their owners. |
@@ -228,7 +246,7 @@ further instructions for the developer.
 | Drift | Every user and group in `/etc` is specified with the UID or GID the build allocated. |
 | Resolution | Every user written as a record resolves through NSS. |
 | Ownership | Every path under `/usr` and `/etc` not owned by `root:root` resolves to a specified user and group. |
-| Stale entries | Every block in the sysusers lock file names a package that is installed, or `-`. |
+| Stale entries | A `# package:` block names an installed package or `-`. A `# removed:` block names a package that is not installed. |
 
 The ownership check catches paths whose UID or GID resolves to no account,
 or by an account that existed only in a build stage. It also covers setgid
@@ -237,8 +255,10 @@ binaries owned by a dynamically allocated group, such as `utempter` in the
 
 The stale entry check is needed because the sysusers lock file recreates
 every account on each build. Without it, a removed package's account would
-stay in the image. `finalize` asks the package manager (`dpkg-query`, `rpm`
-or `pacman`) whether the named package is installed.
+stay in the image unlocked and with its memberships. `finalize` asks the
+package manager (`dpkg-query`, `rpm` or `pacman`) whether the named package is
+installed, and prints the `# removed:` block that replaces the block of a
+package that is not.
 
 ## Limitations
 
@@ -246,6 +266,9 @@ or `pacman`) whether the named package is installed.
 - Groups and their members are not removed from installed systems.
   `/etc/group` is persistent, so a group the image drops remains on systems
   that have it, members included.
+- The accounts of removed packages are never removed. They stay, locked, to
+  keep their IDs, so an account dropped from an image is not yet gone from
+  the system after an upgrade.
 - A base image must not contain users or groups created without the
   sysusers lock file. `systemd-sysusers` does not change the UID or GID of an
   existing account, so the lock file cannot fix them.
@@ -264,3 +287,4 @@ or `pacman`) whether the named package is installed.
   [Users, Groups, UIDs and GIDs on systemd Systems](https://systemd.io/UIDS-GIDS/).
 - Fedora: [Adopting sysusers.d format](https://fedoraproject.org/wiki/Changes/Adopting_sysusers.d_format).
 - Debian: [Policy §9.2 Users and groups](https://www.debian.org/doc/debian-policy/ch-opersys.html#users-and-groups).
+- NixOS: [userborn](https://github.com/nikstur/userborn)
