@@ -78,15 +78,11 @@ impl FromStr for Package {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
     pub package: Package,
-    /// Whether the package was removed. Its accounts stay, locked, and keep
-    /// their IDs, but belong to no group but their own.
     pub removed: bool,
     pub entries: Vec<Entry>,
 }
 
 impl Block {
-    /// The block that keeps the accounts of this one once its package is
-    /// removed: the same users and groups, without memberships.
     #[must_use]
     pub fn to_removed(&self) -> Self {
         Self {
@@ -115,7 +111,7 @@ fn parse_entry(line: &str) -> Result<Entry> {
         Entry::User(user) => ensure_fixed(&user.name, &user.uid)?,
         Entry::Group(group) => ensure_fixed(&group.name, &group.gid)?,
         Entry::Membership(_) => {}
-        Entry::Range(_) => bail!("the lock file takes no r lines"),
+        Entry::Range(_) => bail!("the lock file cannot have r lines"),
     }
     Ok(entry)
 }
@@ -150,7 +146,7 @@ fn parse_line(blocks: &mut Vec<Block>, line: &str) -> Result<()> {
     };
     ensure!(
         !(block.removed && matches!(entry, Entry::Membership(_))),
-        "the block of a removed package takes no m lines"
+        "a '# removed:' block cannot have m lines"
     );
     block.entries.push(entry);
     Ok(())
@@ -259,14 +255,7 @@ mod tests {
         m daemon adm
         # package: -
         g utmp 5
-    "#};
-
-    const REMOVED: &str = indoc! {r#"
-        # package: avahi-daemon
-        g avahi 900
-        u avahi 900 "Avahi mDNS/DNS-SD daemon" / /usr/bin/nologin
         # removed: geoclue-2.0
-        g geoclue-extra 110
         u geoclue 107 - /var/lib/geoclue /usr/sbin/nologin
     "#};
 
@@ -292,8 +281,13 @@ mod tests {
                 (&Package::Named("avahi-daemon".parse()?), 2),
                 (&Package::Named("systemd".parse()?), 3),
                 (&Package::Unowned, 1),
+                (&Package::Named("geoclue-2.0".parse()?), 1),
             ]
         );
+        assert!(!lock.blocks[2].removed);
+        assert!(lock.blocks[3].removed);
+        let removed: Vec<&str> = lock.removed_users().map(Name::as_str).collect();
+        assert_eq!(removed, ["geoclue"]);
         assert_eq!(
             lock.blocks[1].entries[2],
             Entry::Membership(Membership {
@@ -306,7 +300,7 @@ mod tests {
                 .iter()
                 .map(|block| block.entries.len())
                 .sum::<usize>(),
-            6
+            7
         );
         Ok(())
     }
@@ -322,17 +316,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_and_round_trips_removed_blocks() -> Result<()> {
-        let lock: LockFile = REMOVED.parse()?;
-        assert!(!lock.blocks[0].removed);
-        assert!(lock.blocks[1].removed);
-        assert_eq!(lock.to_string(), REMOVED);
-        let removed: Vec<&str> = lock.removed_users().map(Name::as_str).collect();
-        assert_eq!(removed, ["geoclue"]);
-        Ok(())
-    }
-
-    #[test]
     fn rejects_memberships_in_removed_blocks() {
         let err = format!(
             "{:#}",
@@ -341,7 +324,7 @@ mod tests {
                 .unwrap_err()
         );
         assert!(err.starts_with("line 3: "), "{err}");
-        assert!(err.contains("takes no m lines"), "{err}");
+        assert!(err.contains("cannot have m lines"), "{err}");
     }
 
     #[test]
@@ -408,7 +391,7 @@ mod tests {
                 2,
                 "fixed UID or GID, got /usr/bin/x",
             ),
-            ("# package: x\nr - 500-900\n", 2, "takes no r lines"),
+            ("# package: x\nr - 500-900\n", 2, "cannot have r lines"),
         ];
         for (content, line, expected) in cases {
             let err = format!("{:#}", content.parse::<LockFile>().unwrap_err());
