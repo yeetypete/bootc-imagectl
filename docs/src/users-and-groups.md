@@ -149,6 +149,11 @@ flowchart TD
 A UID or GID is chosen once, by the package that first creates the account.
 From then on the sysusers lock file keeps it fixed.
 
+All packages, including tools only the build needs such as `systemd-ukify`,
+must be installed before `finalize`. Package managers such as dpkg and rpm
+read users from `/etc/passwd` instead of through NSS, so they no longer
+find the users `finalize` moved.
+
 ### Derived images
 
 Building an image `FROM` an image that `finalize` already processed is a goal,
