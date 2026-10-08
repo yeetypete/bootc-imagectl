@@ -249,9 +249,7 @@ impl Check {
                 "systemd-sysusers keeps the ID of an existing account, so apply /{lock} before any package creates these accounts, or correct their IDs in it"
             ),
             Self::Ownership => return None,
-            Self::Stale => format!(
-                "remove the package's block from /{lock}, or change its header to '# package: -' if its accounts are kept on purpose"
-            ),
+            Self::Stale => format!("update the blocks in /{lock} as shown"),
             Self::Resolution => {
                 "install nss-systemd and list systemd in the passwd, group and shadow databases of /etc/nsswitch.conf".to_owned()
             }
@@ -366,7 +364,11 @@ fn group_by_package(missing: Vec<Entry>, accounts: &Accounts<'_>) -> Result<Lock
     Ok(LockFile {
         blocks: blocks
             .into_iter()
-            .map(|(package, entries)| Block { package, entries })
+            .map(|(package, entries)| Block {
+                package,
+                removed: false,
+                entries,
+            })
             .collect(),
     })
 }
@@ -458,17 +460,25 @@ fn unresolved_owners(accounts: &Accounts<'_>) -> Result<Vec<String>> {
     Ok(findings)
 }
 
-/// Stale check: the packages the lock file names that are not installed. The
-/// lock file recreates their accounts on every build, so a removed package's
-/// accounts would otherwise stay in the image.
+/// Stale check: the `# package:` blocks of packages that are not installed,
+/// and the `# removed:` blocks of packages that are. A removed package's
+/// accounts would otherwise keep their memberships, and a returned package's
+/// accounts would stay locked.
 fn stale_packages(accounts: &Accounts<'_>) -> Result<Vec<String>> {
     let mut findings = Vec::new();
     for block in accounts.lock.iter().flat_map(|lock| &lock.blocks) {
-        if let Package::Named(name) = &block.package
-            && !accounts.distro.is_installed(name)?
-        {
+        let Package::Named(name) = &block.package else {
+            continue;
+        };
+        let installed = accounts.distro.is_installed(name)?;
+        if !block.removed && !installed {
             findings.push(format!(
-                "the package {name} is not installed but has a block in the lock file"
+                "the package {name} is not installed. Replace its block with:\n{}",
+                block.to_removed()
+            ));
+        } else if block.removed && installed {
+            findings.push(format!(
+                "the package {name} is installed again. Change the header of its block to '# package: {name}'"
             ));
         }
     }
@@ -602,15 +612,24 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -> Resu
 /// Write a user record for every user in /etc/passwd other than root and
 /// nobody, which nss-systemd synthesizes itself, to the drop-in directory.
 /// A user with a password hash in /etc/shadow gets a privileged record with
-/// the hash, every other user is locked.
+/// the hash, every other user is locked, as is every user of a removed
+/// package.
 fn write_user_records(accounts: &Accounts<'_>, defs: &LoginDefs) -> Result<()> {
     let root = accounts.root;
     root.create_dir_all(userdb::DROPIN_DIR)
         .with_context(|| format!("creating /{}", userdb::DROPIN_DIR))?;
     let dir = root.open_dir(userdb::DROPIN_DIR)?;
+    let removed: BTreeSet<&Name> = accounts
+        .lock
+        .iter()
+        .flat_map(|lock| lock.removed_users())
+        .collect();
     let mut written = 0;
     for user in accounts.users_to_lock() {
-        let record = UserRecord::from_passwd(user, accounts.shadow_of(&user.name), defs)
+        let shadow = accounts
+            .shadow_of(&user.name)
+            .filter(|_| !removed.contains(&user.name));
+        let record = UserRecord::from_passwd(user, shadow, defs)
             .with_context(|| format!("the user {}", user.name))?;
         record
             .write(&dir)
@@ -927,8 +946,33 @@ mod tests {
         let fixture = Fixture::new(distro, Some(LOCK), "")?;
         assert_eq!(
             Check::Stale.run(&fixture.accounts())?,
-            ["the package apache is not installed but has a block in the lock file"]
+            [indoc! {"
+                the package apache is not installed. Replace its block with:
+                # removed: apache
+                g http 34
+                u http 33:34 - - -
+            "}]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn stale_check_names_removed_packages_installed_again() -> Result<()> {
+        let lock = LOCK.replace("# package: apache", "# removed: apache");
+        let fixture = Fixture::new(TestDistro::default(), Some(&lock), "")?;
+        assert_eq!(
+            Check::Stale.run(&fixture.accounts())?,
+            [
+                "the package apache is installed again. Change the header of its block to '# package: apache'"
+            ]
+        );
+
+        let distro = TestDistro {
+            not_installed: &["apache"],
+            ..TestDistro::default()
+        };
+        let fixture = Fixture::new(distro, Some(&lock), "")?;
+        assert_eq!(Check::Stale.run(&fixture.accounts())?, Vec::<String>::new());
         Ok(())
     }
 
@@ -947,7 +991,10 @@ mod tests {
             err.starts_with("1 account checks failed\n\nThe stale check failed:\n"),
             "{err}"
         );
-        assert!(err.contains("help: remove the package's block"), "{err}");
+        assert!(
+            err.contains("help: update the blocks in /usr/lib/sysusers.d/"),
+            "{err}"
+        );
         assert!(!err.contains("lock check"), "{err}");
         Ok(())
     }
@@ -1032,6 +1079,19 @@ mod tests {
         );
         assert_eq!(root.read_to_string("etc/shadow")?, "root:!*:20702::::::\n");
         assert_eq!(root.read_to_string("etc/group")?, GROUPS);
+        Ok(())
+    }
+
+    #[test]
+    fn locks_users_of_removed_packages() -> Result<()> {
+        // http has a password hash, but apache was removed.
+        let lock = LOCK.replace("# package: apache", "# removed: apache");
+        let fixture = Fixture::new(TestDistro::default(), Some(&lock), "")?;
+        let root = &fixture.root;
+        write_user_records(&fixture.accounts(), &LoginDefs::default())?;
+        let http = root.read_to_string("usr/lib/userdb/http.user")?;
+        assert!(http.contains("\"locked\": true"), "{http}");
+        assert!(!root.exists("usr/lib/userdb/http.user-privileged"));
         Ok(())
     }
 
