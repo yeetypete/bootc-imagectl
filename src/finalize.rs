@@ -23,6 +23,7 @@ mod initramfs;
 mod kargs;
 mod layout;
 mod presets;
+mod secureboot;
 mod setup_root;
 mod systemd;
 mod tmp_mount;
@@ -58,6 +59,9 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
         transient_etc::finalize(&root).context("making /etc transient")?;
     }
     initramfs::finalize(&root, distro).context("building the initramfs")?;
+    if let (Some(key), Some(cert)) = (&opts.secureboot_private_key, &opts.secureboot_certificate) {
+        secureboot::finalize(&root, key, cert).context("signing for Secure Boot")?;
+    }
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;
     tmp_mount::finalize(&root).context("mounting a tmpfs on /tmp")?;
