@@ -76,6 +76,18 @@ main() {
 
     prepare_storage
 
+    # bootc reads registry credentials from /run/ostree/auth.json instead of
+    # podman's auth file, so private images need it mounted there.
+    local auth=() file
+    for file in "${REGISTRY_AUTH_FILE:-}" "${XDG_RUNTIME_DIR:-}/containers/auth.json" \
+        "/run/containers/${EUID}/auth.json" "${HOME}/.config/containers/auth.json" \
+        "${HOME}/.docker/config.json"; do
+        if [[ -f ${file} ]]; then
+            auth=(--volume "${file}:/run/ostree/auth.json:ro")
+            break
+        fi
+    done
+
     # `udevadm wait` needs udev's netlink events from the host network.
     # Installing from the registry avoids skopeo's temporary layer copies, which
     # are in memory on live systems.
@@ -83,7 +95,7 @@ main() {
         --privileged --pid=host --ipc=host --network=host \
         --security-opt label=type:unconfined_t \
         --volume /dev:/dev --volume /run/udev:/run/udev:ro \
-        --volume "${STORAGE}:${STORAGE}" \
+        --volume "${STORAGE}:${STORAGE}" "${auth[@]}" \
         "${image}" /usr/libexec/bootc-imagectl install \
         --source-imgref "docker://${image}" "${args[@]}" </dev/tty
 }
