@@ -63,7 +63,20 @@ FROM image AS finalized
 
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
+{% if secureboot %}
+# finalize signs systemd-boot with the Secure Boot key, and stages its
+# certificate for systemd-boot to enroll. The secrets are mounted directly in
+# /run, since bootc's lint flags the /run/secrets directory podman creates.
+RUN --mount=type=secret,id=secureboot_key,target=/run/secureboot.key \
+    --mount=type=secret,id=secureboot_cert,target=/run/secureboot.crt \
+    /usr/libexec/bootc-imagectl finalize \
+      --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf \
+      --read-only-accounts \
+      --secureboot-private-key /run/secureboot.key \
+      --secureboot-certificate /run/secureboot.crt
+{% else %}
 RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts{% if transient_etc %} --transient-etc{% endif %}
+{% endif %}
 
 
 # The UKI embeds the kernel and initramfs.
@@ -80,12 +93,25 @@ RUN bootc container lint --fatal-warnings
 # chunkah rewrites.
 FROM chunked AS uki
 
+{% if secureboot %}
+# The UKI is signed with the same key as systemd-boot.
+{% endif %}
 RUN --mount=type=bind,from=chunked,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
+{% if secureboot %}
+    --mount=type=secret,id=secureboot_key,target=/run/secureboot.key \
+    --mount=type=secret,id=secureboot_cert,target=/run/secureboot.crt \
+{% endif %}
     kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
     mkdir /uki && \
     bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
-      -- --output "/uki/${kver}.efi"
+      -- \
+{% if secureboot %}
+      --signtool systemd-sbsign --no-sign-kernel \
+      --secureboot-private-key /run/secureboot.key \
+      --secureboot-certificate /run/secureboot.crt \
+{% endif %}
+      --output "/uki/${kver}.efi"
 
 
 FROM chunked

@@ -25,6 +25,8 @@ pub enum Feature {
     Homed,
     /// The image has a transient /etc.
     TransientEtc,
+    /// The image is signed for Secure Boot.
+    SecureBoot,
 }
 
 impl FromStr for Feature {
@@ -34,6 +36,7 @@ impl FromStr for Feature {
         match name {
             "homed" => Ok(Self::Homed),
             "transient-etc" => Ok(Self::TransientEtc),
+            "secureboot" => Ok(Self::SecureBoot),
             _ => bail!("unknown feature {name}"),
         }
     }
@@ -44,6 +47,7 @@ impl fmt::Display for Feature {
         f.write_str(match self {
             Self::Homed => "systemd-homed",
             Self::TransientEtc => "a transient /etc",
+            Self::SecureBoot => "Secure Boot",
         })
     }
 }
