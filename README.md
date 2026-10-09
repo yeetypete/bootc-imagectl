@@ -62,8 +62,8 @@ End the build with `bootc container lint` to check the image.
 
 ## Secure Boot
 
-To sign the image for Secure Boot, pass a key and certificate to `finalize`
-and `bootc container ukify` as build secrets (see the
+To sign the image for Secure Boot, pass a key as a build secret and its
+certificate to `finalize` and `bootc container ukify` (see the
 [example](tests/images/fedora/Containerfile.j2)).
 `finalize` signs systemd-boot and stages the certificate for systemd-boot to
 enroll. This needs systemd 257 or newer.
