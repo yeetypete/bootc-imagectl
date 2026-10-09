@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::{homed, status};
+use crate::{homed, secureboot, status};
 
 #[test]
 fn updates_from_target_imgref() -> Result<()> {
@@ -14,4 +14,10 @@ fn adds_wizard_user_to_groups() -> Result<()> {
     homed::adds_wizard_user_to(&[
         "sudo", "audio", "cdrom", "dip", "floppy", "video", "plugdev", "lpadmin",
     ])
+}
+
+#[test]
+fn boots_without_secure_boot() -> Result<()> {
+    assert!(!secureboot::enabled()?);
+    Ok(())
 }
