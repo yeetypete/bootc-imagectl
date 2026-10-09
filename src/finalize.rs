@@ -22,6 +22,7 @@ mod kargs;
 mod layout;
 mod lint;
 mod presets;
+mod secureboot;
 mod systemd;
 mod tmpfiles;
 mod units;
@@ -42,6 +43,9 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     homed::finalize(&root, distro).context("configuring the systemd-homed first boot wizard")?;
     accounts::finalize(&root, distro, &opts.sysusers_lock).context("finalizing the accounts")?;
     initramfs::finalize(&root, distro).context("building the initramfs")?;
+    if let (Some(key), Some(cert)) = (&opts.secureboot_private_key, &opts.secureboot_certificate) {
+        secureboot::finalize(&root, key, cert).context("signing for Secure Boot")?;
+    }
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;
     kargs::finalize(&root).context("writing the kernel arguments")?;

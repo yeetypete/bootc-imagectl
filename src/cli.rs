@@ -48,6 +48,15 @@ pub struct FinalizeOpts {
     /// your Containerfile.
     #[arg(long, value_name = "PATH")]
     pub sysusers_lock: Utf8PathBuf,
+
+    /// The private key that signs for Secure Boot, in PEM form, e.g.
+    /// `/run/secureboot.key` from a build secret.
+    #[arg(long, value_name = "PATH", requires = "secureboot_certificate")]
+    pub secureboot_private_key: Option<Utf8PathBuf>,
+
+    /// The certificate of --secureboot-private-key, in PEM form.
+    #[arg(long, value_name = "PATH", requires = "secureboot_private_key")]
+    pub secureboot_certificate: Option<Utf8PathBuf>,
 }
 
 /// Options for `install`.
