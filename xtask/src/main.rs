@@ -40,7 +40,8 @@ enum Task {
     Vm {
         #[command(flatten)]
         build: Build,
-        /// The image's tag, e.g. `ubuntu` or `ubuntu-homed`.
+        /// The image's tag, e.g. `ubuntu`, `ubuntu-homed` or
+        /// `ubuntu-secureboot`.
         image: String,
     },
     /// Build an example, install it onto a disk and boot it in a VM with a
@@ -99,19 +100,55 @@ struct Selection {
     images: Vec<String>,
 }
 
+/// The Secure Boot key and certificate the test images are signed with,
+/// generated in `target` on first use.
+fn secureboot_key(sh: &Shell, target: &Path) -> Result<(PathBuf, PathBuf)> {
+    let dir = target.join("secureboot");
+    let key = dir.join("db.key");
+    let cert = dir.join("db.crt");
+    if !cert.exists() {
+        sh.create_dir(&dir)?;
+        let tmp_key = dir.join("db.key.tmp");
+        let tmp_cert = dir.join("db.crt.tmp");
+        cmd!(
+            sh,
+            "openssl req -quiet -newkey rsa:2048 -nodes -keyout {tmp_key} -x509 -sha256 -days 3650 -subj /CN=bootc-imagectl-test/ -out {tmp_cert}"
+        )
+        .run()?;
+        std::fs::rename(tmp_key, &key)?;
+        std::fs::rename(tmp_cert, &cert)?;
+    }
+    Ok((key, cert))
+}
+
 impl Build {
-    /// Build the image `name` rendered into `dir` as `image`, with the
+    /// Build `image` rendered into `dir` as `reference`, with the
     /// bootc-imagectl binary from `target`.
-    fn build(&self, sh: &Shell, name: &str, image: &str, dir: &Path, target: &Path) -> Result<()> {
-        let options: Vec<String> = self
+    fn build(
+        &self,
+        sh: &Shell,
+        image: &images::Image,
+        reference: &str,
+        dir: &Path,
+        target: &Path,
+    ) -> Result<()> {
+        let mut options: Vec<String> = self
             .options
             .iter()
             .filter(|option| !option.is_empty())
-            .map(|option| option.replace("{image}", name))
+            .map(|option| option.replace("{image}", &image.build_name()))
             .collect();
+        if image.secure_boot() {
+            let (key, cert) = secureboot_key(sh, target)?;
+            options.push(format!("--secret=id=secureboot_key,src={}", key.display()));
+            options.push(format!(
+                "--secret=id=secureboot_cert,src={}",
+                cert.display()
+            ));
+        }
         cmd!(
             sh,
-            "podman build {options...} --build-context bootc-imagectl={target} --tag {image} {dir}"
+            "podman build {options...} --build-context bootc-imagectl={target} --tag {reference} {dir}"
         )
         .run()?;
         Ok(())
@@ -136,12 +173,19 @@ impl Suite {
         images::images(workspace_dir()?, sources)
     }
 
-    /// Run the test binary against `image`.
-    fn run(self, sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> Result<()> {
+    /// Run the test binary against `image`, built as `reference`.
+    fn run(
+        self,
+        sh: &Shell,
+        image: &images::Image,
+        reference: &str,
+        binary: &Path,
+        args: &[OsString],
+    ) -> Result<()> {
         match self {
-            Self::Container => container::run(sh, image, binary, args),
-            Self::Vm => vm::run(sh, image, binary, args),
-            Self::Install => install::run(sh, image, binary, args),
+            Self::Container => container::run(sh, reference, binary, args),
+            Self::Vm => vm::run(sh, reference, binary, args),
+            Self::Install => install::run(sh, reference, image.secure_boot(), binary, args),
         }
     }
 }
@@ -283,7 +327,7 @@ fn run(
             "never"
         };
         args.push(format!("--color={color}").into());
-        suite.run(sh, &reference, binary, &args)?;
+        suite.run(sh, image, &reference, binary, &args)?;
     }
     Ok(())
 }
@@ -325,7 +369,7 @@ fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) 
     let dir = target.join("images").join(&tag);
     let reference = format!("{REPOSITORY}:{tag}");
     image.render(workspace_dir()?, &dir)?;
-    build.build(sh, &image.build_name(), &reference, &dir, target)?;
+    build.build(sh, image, &reference, &dir, target)?;
     Ok(reference)
 }
 

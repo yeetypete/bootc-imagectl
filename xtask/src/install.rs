@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use rustix::process::{Pid, Signal, kill_process};
-use serde_json::json;
+use serde_json::{Value, json};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use xshell::{Shell, cmd};
@@ -72,10 +72,16 @@ const MACHINE: &str = "bootc-imagectl-test";
 
 /// Install the image onto a fresh disk, boot it and run the test binary in
 /// it over ssh.
-pub(crate) fn run(sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> Result<()> {
+pub(crate) fn run(
+    sh: &Shell,
+    image: &str,
+    secure_boot: bool,
+    binary: &Path,
+    args: &[OsString],
+) -> Result<()> {
     let work = target_dir(binary)?.join("install");
     let disk = install_disk(sh, image, &work, Passphrase::Fixed)?;
-    let mut vm = Vm::boot(binary, &work, &disk)?;
+    let mut vm = Vm::boot(sh, secure_boot, binary, &work, &disk)?;
     vm.wait_for_ssh(sh)?;
     vm.run_tests(sh, binary, args)?;
     vm.power_off(sh)?;
@@ -171,6 +177,34 @@ fn vmspawn_error(e: io::Error) -> anyhow::Error {
     }
 }
 
+/// A firmware descriptor systemd-vmspawn finds for Secure Boot in setup
+/// mode. systemd-boot enrolls the image's keys with it on first boot.
+fn setup_mode_firmware(sh: &Shell) -> Result<PathBuf> {
+    let list = cmd!(sh, "systemd-vmspawn --firmware=list").quiet().read()?;
+    for path in list.lines().map(PathBuf::from) {
+        let descriptor: Value = serde_json::from_slice(&fs::read(&path)?)
+            .with_context(|| format!("parsing {}", path.display()))?;
+        let has = |key: &str, value: &str| {
+            descriptor[key]
+                .as_array()
+                .is_some_and(|values| values.iter().any(|v| v == value))
+        };
+        let for_arch = descriptor["targets"].as_array().is_some_and(|targets| {
+            targets
+                .iter()
+                .any(|target| target["architecture"] == env::consts::ARCH)
+        });
+        if for_arch
+            && has("interface-types", "uefi")
+            && has("features", "secure-boot")
+            && !has("features", "enrolled-keys")
+        {
+            return Ok(path);
+        }
+    }
+    bail!("no UEFI firmware with Secure Boot in setup mode, see systemd-vmspawn --firmware=list")
+}
+
 /// Remove a leftover installer container and VM.
 fn remove_instances(sh: &Shell) -> Result<()> {
     cmd!(sh, "podman rm --force --ignore {INSTALLER_CONTAINER}")
@@ -263,7 +297,13 @@ struct Vm {
 }
 
 impl Vm {
-    fn boot(binary: &Path, work: &Path, disk: &Path) -> Result<Self> {
+    fn boot(
+        sh: &Shell,
+        secure_boot: bool,
+        binary: &Path,
+        work: &Path,
+        disk: &Path,
+    ) -> Result<Self> {
         // Short, since systemd-vmspawn creates sockets in it.
         let runtime_dir =
             Path::new(&env::var_os("XDG_RUNTIME_DIR").context("XDG_RUNTIME_DIR is not set")?)
@@ -275,9 +315,16 @@ impl Vm {
         fs::create_dir(&runtime_dir)?;
 
         let journal = work.join("vm.journal");
+        // A signed image enrolls its keys and boots with Secure Boot on.
+        let firmware = if secure_boot {
+            format!("--firmware={}", setup_mode_firmware(sh)?.display())
+        } else {
+            "--secure-boot=no".into()
+        };
         let cid = random_cid();
         let vmspawn = vmspawn(disk)
             .env("RUNTIME_DIRECTORY", &runtime_dir)
+            .arg(firmware)
             .arg("--console=read-only")
             .arg(format!("--vsock-cid={cid}"))
             .arg(format!(
