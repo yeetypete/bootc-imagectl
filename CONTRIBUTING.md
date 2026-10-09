@@ -36,10 +36,11 @@ against the images in [`examples`](examples), tagged `<name>-example`:
 The `just test-*` recipes run `cargo xtask test <suite>`. This command builds
 `bootc-imagectl` from the working tree, builds each image with it, then runs
 the suite's test binary in the image. Each image in `tests/images` is also
-built as a `-homed` variant without a regular user and a `-transient-etc`
-variant with a transient `/etc`. `--image <tag>` limits the run to one image,
-e.g. `just test-vm --image fedora-homed`. Other arguments
-after the suite go to the test binary, for example a test name filter.
+built as a `-homed` variant without a regular user, a `-transient-etc`
+variant with a transient `/etc` and a `-secureboot` variant signed for Secure
+Boot. `--image <tag>` limits the run to one image, e.g.
+`just test-vm --image fedora-homed`. Other arguments after the suite go to the
+test binary, for example a test name filter.
 
 Images are built with Podman. `--build-option` (or
 `BOOTC_IMAGECTL_BUILD_OPTIONS`) passes an option to `podman build`, such as a
@@ -70,8 +71,8 @@ A distribution needs:
   selected by its os-release `ID` in [`src/distro.rs`](src/distro.rs).
   Derivatives that list it in `ID_LIKE` in `/etc/os-release` may also use it.
 - A test image in `tests/images/<name>`, with its sysusers lock file. `.j2`
-  files are templates rendered with `homed` or `transient_etc` set for the
-  variants.
+  files are templates rendered with `homed`, `transient_etc` or `secureboot`
+  set for the variants.
 - Its accounts and the groups of the homed wizard's user in
   [`src/testing.rs`](src/testing.rs). Checks specific to it go in
   `tests/container/<name>.rs` and require its distribution.
