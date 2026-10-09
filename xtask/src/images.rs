@@ -26,16 +26,24 @@ enum Variant {
     Homed,
     /// [`Self::Homed`] with a transient /etc.
     TransientEtc,
+    /// The image is signed for Secure Boot.
+    SecureBoot,
 }
 
 impl Variant {
-    const ALL: [Self; 3] = [Self::Default, Self::Homed, Self::TransientEtc];
+    const ALL: [Self; 4] = [
+        Self::Default,
+        Self::Homed,
+        Self::TransientEtc,
+        Self::SecureBoot,
+    ];
 
     /// The variables the templates see.
     fn context(self) -> Value {
         context! {
-            homed => self != Self::Default,
+            homed => matches!(self, Self::Homed | Self::TransientEtc),
             transient_etc => self == Self::TransientEtc,
+            secureboot => self == Self::SecureBoot,
         }
     }
 }
@@ -92,6 +100,7 @@ impl Image {
             (Source::Test, Variant::Default) => self.name.clone(),
             (Source::Test, Variant::Homed) => format!("{}-homed", self.name),
             (Source::Test, Variant::TransientEtc) => format!("{}-transient-etc", self.name),
+            (Source::Test, Variant::SecureBoot) => format!("{}-secureboot", self.name),
         }
     }
 
@@ -101,6 +110,11 @@ impl Image {
             Source::Test => self.name.clone(),
             Source::Example => self.tag(),
         }
+    }
+
+    /// Whether the image is signed for Secure Boot.
+    pub(crate) fn secure_boot(&self) -> bool {
+        self.variant == Variant::SecureBoot
     }
 
     /// The module holding the image's tests, named after its tag.
