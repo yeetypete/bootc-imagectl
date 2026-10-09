@@ -60,11 +60,11 @@ FROM image AS finalized
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
 {% if secureboot %}
-# finalize signs systemd-boot with the Secure Boot key, and stages its
-# certificate for systemd-boot to enroll. The secrets are mounted directly in
-# /run, since bootc's lint flags the /run/secrets directory podman creates.
+# finalize signs systemd-boot and stages the certificate for enrollment.
+# The certificate is bind-mounted so a new key invalidates the cache. The
+# key goes in /run, since bootc's lint flags podman's /run/secrets.
 RUN --mount=type=secret,id=secureboot_key,target=/run/secureboot.key \
-    --mount=type=secret,id=secureboot_cert,target=/run/secureboot.crt \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
     /usr/libexec/bootc-imagectl finalize \
       --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf \
       --secureboot-private-key /run/secureboot.key \
@@ -94,7 +94,7 @@ RUN --mount=type=bind,from=rootfs,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
 {% if secureboot %}
     --mount=type=secret,id=secureboot_key,target=/run/secureboot.key \
-    --mount=type=secret,id=secureboot_cert,target=/run/secureboot.crt \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
 {% endif %}
     kver="$(ls /kernel)" && \
     mkdir /uki && \

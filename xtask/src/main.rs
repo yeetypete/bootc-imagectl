@@ -94,12 +94,12 @@ struct Selection {
 /// generated in `target` on first use.
 fn secureboot_key(sh: &Shell, target: &Path) -> Result<(PathBuf, PathBuf)> {
     let dir = target.join("secureboot");
-    let key = dir.join("db.key");
-    let cert = dir.join("db.crt");
+    let key = dir.join("secureboot.key");
+    let cert = dir.join("secureboot.crt");
     if !cert.exists() {
         sh.create_dir(&dir)?;
-        let tmp_key = dir.join("db.key.tmp");
-        let tmp_cert = dir.join("db.crt.tmp");
+        let tmp_key = dir.join("secureboot.key.tmp");
+        let tmp_cert = dir.join("secureboot.crt.tmp");
         cmd!(
             sh,
             "openssl req -quiet -newkey rsa:2048 -nodes -keyout {tmp_key} -x509 -sha256 -days 3650 -subj /CN=bootc-imagectl-test/ -out {tmp_cert}"
@@ -131,10 +131,8 @@ impl Build {
         if image.secure_boot() {
             let (key, cert) = secureboot_key(sh, target)?;
             options.push(format!("--secret=id=secureboot_key,src={}", key.display()));
-            options.push(format!(
-                "--secret=id=secureboot_cert,src={}",
-                cert.display()
-            ));
+            let dir = cert.parent().context("finding the key directory")?;
+            options.push(format!("--build-context=secureboot={}", dir.display()));
         }
         cmd!(
             sh,
