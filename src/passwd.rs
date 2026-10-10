@@ -92,7 +92,7 @@ fn parse_names(field: &str) -> Result<Vec<Name>> {
 }
 
 /// A comma-separated list of names.
-struct Names<'a>(&'a [Name]);
+pub(crate) struct Names<'a>(pub(crate) &'a [Name]);
 
 impl fmt::Display for Names<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

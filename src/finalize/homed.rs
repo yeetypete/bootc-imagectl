@@ -5,8 +5,6 @@
 //! the groups the distributions' installers assign it. finalize only changes
 //! this unit if it is enabled in the image.
 
-use std::collections::BTreeSet;
-
 use anyhow::{Context, Result, bail, ensure};
 use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs_utf8::Dir;
@@ -14,7 +12,8 @@ use tracing::info;
 
 use super::units;
 use crate::distro::Distro;
-use crate::passwd::{Entry, Group};
+use crate::passwd::{Entry, Group, Names};
+use crate::sysusers::Name;
 
 /// The wizard's unit.
 const UNIT: &str = "systemd-homed-firstboot.service";
@@ -41,22 +40,27 @@ fn configure(root: &Dir, distro: &dyn Distro, config: &str) -> Result<()> {
     let groups = groups(root, distro)?;
     let command = exec_start(config).with_context(|| format!("reading the command of {UNIT}"))?;
     write_dropin(root, command, &groups)?;
-    info!("{UNIT} adds the user it creates to {}", groups.join(", "));
+    info!("{UNIT} adds the user it creates to {}", Names(&groups));
     Ok(())
 }
 
 /// The admin group and the default user groups the image has.
-fn groups(root: &Dir, distro: &dyn Distro) -> Result<Vec<&'static str>> {
+fn groups(root: &Dir, distro: &dyn Distro) -> Result<Vec<Name>> {
     let existing = Group::read_all(root)?;
-    let existing: BTreeSet<&str> = existing.iter().map(|group| group.name.as_str()).collect();
+    let find = |name: &str| existing.iter().find(|group| group.name.as_str() == name);
     let admin = distro.admin_group();
-    ensure!(
-        existing.contains(admin),
-        "{UNIT} is enabled but the image has no {admin} group. The user it creates could not administer the system"
-    );
-    let extra = distro.default_user_groups().iter().copied();
+    let admin = find(admin).with_context(|| {
+        format!(
+            "{UNIT} is enabled but the image has no {admin} group. The user it creates could not administer the system"
+        )
+    })?;
+    let extra = distro
+        .default_user_groups()
+        .iter()
+        .filter_map(|name| find(name));
     Ok(std::iter::once(admin)
-        .chain(extra.filter(|group| existing.contains(group)))
+        .chain(extra)
+        .map(|group| group.name.clone())
         .collect())
 }
 
@@ -95,7 +99,7 @@ fn exec_start(config: &str) -> Result<&str> {
 }
 
 /// Write the drop-in that runs `command` with `--member-of`.
-fn write_dropin(root: &Dir, command: &str, groups: &[&str]) -> Result<()> {
+fn write_dropin(root: &Dir, command: &str, groups: &[Name]) -> Result<()> {
     root.create_dir_all(DROPIN_DIR)
         .with_context(|| format!("creating /{DROPIN_DIR}"))?;
     let path = format!("{DROPIN_DIR}/{DROPIN}");
@@ -103,7 +107,7 @@ fn write_dropin(root: &Dir, command: &str, groups: &[&str]) -> Result<()> {
         &path,
         format!(
             "[Service]\nExecStart=\nExecStart={command} --member-of={}\n",
-            groups.join(",")
+            Names(groups)
         ),
     )
     .with_context(|| format!("writing /{path}"))
