@@ -6,9 +6,9 @@ use anyhow::{Context, Result, ensure};
 
 use crate::command::CommandRunExt;
 
-/// The oldest systemd bootc-imagectl works with. `install` needs
-/// `$SYSTEMD_REPART_MKFS_OPTIONS_EXT4` from systemd 254 to enable fs-verity.
-const MIN_VERSION: u32 = 254;
+/// The oldest systemd bootc-imagectl works with. finalize needs
+/// `systemd-sysusers --tldr` from systemd 255.
+const MIN_VERSION: u32 = 255;
 
 /// Fail if the image's systemd is older than [`MIN_VERSION`].
 pub(super) fn check() -> Result<()> {

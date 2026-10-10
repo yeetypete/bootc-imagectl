@@ -17,18 +17,18 @@
 //! r     -        500-900
 //! ```
 
-use std::collections::BTreeMap;
 use std::fmt::{self, Write};
 use std::ops::RangeInclusive;
+use std::process::Command;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, bail, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::fs_utf8::Dir;
-use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 
 use word::WHITESPACE;
 
+use crate::command::CommandRunExt;
 use crate::id::{Gid, Uid};
 
 mod index;
@@ -37,16 +37,6 @@ mod parse;
 mod word;
 
 pub use index::{Configuration, Index};
-
-/// The directories systemd-sysusers reads, relative to the rootfs, in order
-/// of precedence. A file in an earlier directory overrides a file of the same
-/// name in a later one.
-const CONFIG_DIRS: &[&str] = &[
-    "etc/sysusers.d",
-    "run/sysusers.d",
-    "usr/local/lib/sysusers.d",
-    "usr/lib/sysusers.d",
-];
 
 /// The longest user or group name systemd accepts.
 const MAX_NAME_LEN: usize = 31;
@@ -372,56 +362,44 @@ pub(crate) fn is_config_file_name(name: &str) -> bool {
     !name.starts_with('.') && name.strip_suffix(".conf").is_some()
 }
 
-/// Read every sysusers.d file in the rootfs, in the same order systemd-sysusers
-/// applies them: sorted by file name across all of [`CONFIG_DIRS`]. A file overrides
-/// files of the same name later directories in [`CONFIG_DIRS`], and a symlink to
-/// `/dev/null` or an empty file hides them without contributing entries.
+/// Read every sysusers.d file systemd-sysusers applies, in the order it
+/// applies them.
 ///
 /// # Errors
 ///
-/// Fails on a filesystem error, a file name that is not UTF-8, an entry
-/// that is not a regular file, or a malformed file. The error names the
-/// file.
+/// Fails if systemd-sysusers fails, or if a file cannot be read or is
+/// malformed. The error names the file.
 pub(crate) fn read_all(root: &Dir) -> Result<Vec<ConfigFile>> {
-    // File name to path, or `None` for a masked name.
-    let mut files: BTreeMap<String, Option<Utf8PathBuf>> = BTreeMap::new();
-    for dir in CONFIG_DIRS {
-        let Some(confs) = root.open_dir_optional(dir)? else {
-            continue;
-        };
-        for entry in confs.entries()? {
-            let name = entry?
-                .file_name()
-                .with_context(|| format!("reading /{dir}"))?;
-            if !is_config_file_name(&name) || files.contains_key(&name) {
-                continue;
-            }
-            let path = Utf8Path::new(dir).join(&name);
-            // Checked before following the link, which may not resolve in
-            // the rootfs.
-            let masks = confs
-                .read_link_contents(&name)
-                .is_ok_and(|target| target == "/dev/null");
-            if masks {
-                files.insert(name, None);
-                continue;
-            }
-            let meta = confs
-                .metadata(&name)
-                .with_context(|| format!("reading /{path}"))?;
-            ensure!(meta.is_file(), "/{path} is not a regular file");
-            files.insert(name, (meta.len() > 0).then_some(path));
-        }
-    }
-    files
-        .into_values()
-        .flatten()
+    let config = Command::new("systemd-sysusers")
+        .args(["--root=/", "--tldr"])
+        .output_string()?;
+    read(root, config_paths(&config))
+}
+
+/// The paths of the files in `systemd-sysusers --tldr` output, relative to
+/// the rootfs. Each file starts with a `# <path>` line, or is a single
+/// `# <path> is a mask.` line.
+fn config_paths(config: &str) -> impl Iterator<Item = &Utf8Path> {
+    config
+        .lines()
+        .filter_map(|line| line.strip_prefix("# /"))
+        .filter(|path| !path.ends_with(" is a mask."))
+        .map(Utf8Path::new)
+}
+
+/// Read the sysusers.d files at `paths`, relative to the rootfs.
+fn read<'a>(root: &Dir, paths: impl IntoIterator<Item = &'a Utf8Path>) -> Result<Vec<ConfigFile>> {
+    paths
+        .into_iter()
         .map(|path| {
             let content = root
-                .read_to_string(&path)
+                .read_to_string(path)
                 .with_context(|| format!("reading /{path}"))?;
             let entries = parse(&content).with_context(|| format!("parsing /{path}"))?;
-            Ok(ConfigFile { path, entries })
+            Ok(ConfigFile {
+                path: path.to_owned(),
+                entries,
+            })
         })
         .collect()
 }
@@ -432,10 +410,6 @@ mod tests {
 
     use super::*;
     use crate::testutil::rootfs;
-
-    fn name(name: &str) -> Name {
-        Name(name.into())
-    }
 
     #[test]
     fn validates_names() {
@@ -476,78 +450,32 @@ mod tests {
     }
 
     #[test]
-    fn reads_all_directories_in_file_name_order() -> Result<()> {
-        let root = rootfs()?;
-        for dir in CONFIG_DIRS {
-            root.create_dir_all(dir)?;
-        }
-        root.write("usr/lib/sysusers.d/basic.conf", "g wheel 998\n")?;
-        root.write("usr/lib/sysusers.d/zz.conf", "g zz -\n")?;
-        root.write("usr/local/lib/sysusers.d/local.conf", "g local -\n")?;
-        root.write("run/sysusers.d/aa.conf", "g aa -\n")?;
-        root.write("etc/sysusers.d/README", "g not-a-conf -\n")?;
-        root.write("etc/sysusers.d/.hidden.conf", "g hidden -\n")?;
-        // A file in etc hides the one in usr/lib.
-        root.write("usr/lib/sysusers.d/pkg.conf", "g vendor -\n")?;
-        root.write("etc/sysusers.d/pkg.conf", "g admin -\n")?;
-        // A symlink to /dev/null and an empty file mask files.
-        root.write("usr/lib/sysusers.d/masked.conf", "g masked -\n")?;
-        root.symlink_contents("/dev/null", "etc/sysusers.d/masked.conf")?;
-        root.write("usr/lib/sysusers.d/empty.conf", "g empty -\n")?;
-        root.write("run/sysusers.d/empty.conf", "")?;
+    fn lists_config_paths() {
+        let config = indoc! {"
+            # /usr/lib/sysusers.d/basic.conf
+            g wheel 998
 
-        let files = read_all(&root)?;
+            # /etc/sysusers.d/empty.conf is a mask.
 
-        let paths: Vec<_> = files.iter().map(|file| file.path.as_str()).collect();
+            # /usr/local/lib/sysusers.d/local.conf
+            g local -
+        "};
         assert_eq!(
-            paths,
+            config_paths(config).collect::<Vec<_>>(),
             [
-                "run/sysusers.d/aa.conf",
                 "usr/lib/sysusers.d/basic.conf",
-                "usr/local/lib/sysusers.d/local.conf",
-                "etc/sysusers.d/pkg.conf",
-                "usr/lib/sysusers.d/zz.conf",
+                "usr/local/lib/sysusers.d/local.conf"
             ]
         );
-        assert_eq!(
-            files[3].entries,
-            [Entry::Group(Group {
-                name: name("admin"),
-                gid: IdSource::Automatic,
-            })],
-            "the file in etc hides the one in usr/lib"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn rejects_directories_and_dangling_symlinks() -> Result<()> {
-        let root = rootfs()?;
-        root.create_dir_all("etc/sysusers.d")?;
-        root.create_dir("etc/sysusers.d/dir.conf")?;
-        let err = format!("{:#}", read_all(&root).unwrap_err());
-        assert!(
-            err.contains("/etc/sysusers.d/dir.conf is not a regular file"),
-            "{err}"
-        );
-
-        root.remove_dir("etc/sysusers.d/dir.conf")?;
-        root.symlink("nowhere", "etc/sysusers.d/dangling.conf")?;
-        let err = format!("{:#}", read_all(&root).unwrap_err());
-        assert!(
-            err.contains("reading /etc/sysusers.d/dangling.conf"),
-            "{err}"
-        );
-        Ok(())
     }
 
     #[test]
     fn rejects_malformed_file_with_its_line() -> Result<()> {
         let root = rootfs()?;
-        assert_eq!(read_all(&root)?, [], "no sysusers.d directory yet");
         root.create_dir_all("usr/lib/sysusers.d")?;
         root.write("usr/lib/sysusers.d/bad.conf", "u\n")?;
-        let err = format!("{:#}", read_all(&root).unwrap_err());
+        let path = Utf8Path::new("usr/lib/sysusers.d/bad.conf");
+        let err = format!("{:#}", read(&root, [path]).unwrap_err());
         assert!(err.contains("/usr/lib/sysusers.d/bad.conf"), "{err}");
         assert!(err.contains("line 1"), "{err}");
         Ok(())
