@@ -511,7 +511,6 @@ fn unresolved_accounts(accounts: &Accounts<'_>) -> Result<Vec<String>> {
             None => findings.push(format!("UID {uid} does not resolve")),
         }
     }
-    // The memberships below resolve the groups by name.
     for group in accounts.groups_to_lock() {
         let (name, gid) = (&group.name, group.gid);
         match nss.group_name_of(gid) {
@@ -633,7 +632,7 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -> Resu
 }
 
 /// Write a user record for every user in /etc/passwd other than root and
-/// nobody, which nss-systemd synthesizes itself, to the drop-in directory.
+/// nobody, which stay in /etc, to the drop-in directory.
 /// A user with a password hash in /etc/shadow gets a privileged record with
 /// the hash, every other user is locked, as is every user of a removed
 /// package.
@@ -663,7 +662,7 @@ fn write_user_records(accounts: &Accounts<'_>) -> Result<()> {
 }
 
 /// Write a group record for every group in /etc/group other than root and
-/// nobody, which nss-systemd synthesizes itself, to the drop-in directory.
+/// nobody, which stay in /etc, to the drop-in directory.
 fn write_group_records(accounts: &Accounts<'_>) -> Result<()> {
     let dir = accounts.root.open_dir(userdb::DROPIN_DIR)?;
     let mut written = 0;
