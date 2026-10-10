@@ -1,24 +1,29 @@
-ARG ARCH_IMAGE=docker.io/archlinux/archlinux:base-20260906.0.587188@sha256:1eb3314f8f66ab90c8c755acaf9a5502c705b81104cb885ea69f1c74f3a6bb80
+ARG UBUNTU_IMAGE=docker.io/library/ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
 
 
-FROM ${ARCH_IMAGE} AS system-files
+FROM ${UBUNTU_IMAGE} AS system-files
 
 COPY system_files/ /system_files/
 RUN chmod -R go-w /system_files
 
-FROM ${ARCH_IMAGE} AS bootc-builder
+FROM ${UBUNTU_IMAGE} AS bootc-builder
 
 ARG BOOTC_VERSION=v1.16.10
+ENV DEBIAN_FRONTEND=noninteractive
 
-RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
-    pacman-key --init && pacman-key --populate archlinux && \
-    pacman -Syu --noconfirm --needed \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
+    build-essential \
+    ca-certificates \
+    cargo \
     git \
     go-md2man \
-    make \
-    ostree \
-    pkgconf \
-    rust
+    libostree-dev \
+    libssl-dev \
+    libzstd-dev \
+    pkg-config \
+    rustc
 
 WORKDIR /bootc
 
@@ -29,45 +34,65 @@ RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
     make bin install DESTDIR=/out
 
 
-FROM ${ARCH_IMAGE} AS image
+FROM ${UBUNTU_IMAGE} AS image
 
-# Mask dracut's alpm hooks with empty files to prevent them from building an initramfs into
-# /boot when the kernel is installed. finalize builds it next to the kernel.
-RUN mkdir -p /etc/pacman.d/hooks && \
-    touch /etc/pacman.d/hooks/60-dracut-remove.hook /etc/pacman.d/hooks/90-dracut-install.hook
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Keep package installs from generating an initramfs.
+ENV INITRD=No
+COPY --from=system-files /system_files/usr/lib/kernel/ /usr/lib/kernel/
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y systemd
 
 # Create every user and group with the UID and GID the sysusers lock file fixes
 # before any package can allocate a different one.
 COPY --from=system-files /system_files/usr/lib/sysusers.d/00-bootc-imagectl.lock.conf /usr/lib/sysusers.d/
 RUN systemd-sysusers
 
-RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
-    pacman-key --init && pacman-key --populate archlinux && \
-    pacman -Syu --noconfirm --needed \
-    base \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
     binutils \
     btrfs-progs \
+    cryptsetup-bin \
+    dmsetup \
     dosfstools \
     dracut \
-    linux \
-    openssh \
+    fdisk \
+    libnss-systemd \
+    linux-image-virtual \
+    openssh-server \
     ostree \
     skopeo \
+    ssl-cert \
+    systemd-boot \
+    systemd-boot-efi \
+    systemd-cryptsetup \
+    systemd-homed \
+    systemd-repart \
+    systemd-sysv \
     systemd-ukify \
     zstd
 
-# A regular user with a password and a group, for the tests of the user
-# records.
-RUN echo 'archie:archie' | chpasswd && usermod -aG wheel archie
-
-COPY --from=bootc-builder /out/usr/ /usr/
-
 # Bootc links against the installed libostree.
+COPY --from=bootc-builder /out/usr/ /usr/
 RUN ldconfig
+
+{% if homed %}
+RUN userdel --remove ubuntu
+{% else %}
+# The base image's user, with a password, for the tests of the user records.
+RUN echo 'ubuntu:ubuntu' | chpasswd
+{% endif %}
 
 COPY --from=system-files /system_files/ /
 
-RUN systemctl enable systemd-networkd.service sshd.service remote-fs.target
+RUN systemctl enable systemd-networkd.service ssh.service
+{% if homed %}
+RUN systemctl enable systemd-homed-firstboot.service
+{% endif %}
 
 LABEL containers.bootc=1
 CMD ["/sbin/init"]

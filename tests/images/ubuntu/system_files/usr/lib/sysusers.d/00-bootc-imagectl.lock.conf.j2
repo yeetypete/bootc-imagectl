@@ -14,6 +14,13 @@ g render 993
 g _ssh 101
 # package: ssl-cert
 g ssl-cert 102
+# package: dbus-system-bus-common
+g messagebus 991
+u messagebus 991 "System Message Bus" /nonexistent /usr/sbin/nologin
+# package: polkitd
+g polkitd 990
+u polkitd 990 "User for polkitd" / /usr/sbin/nologin
+{% if not homed %}
 # package: -
 g ubuntu 1000
 u ubuntu 1000 Ubuntu /home/ubuntu /bin/bash
@@ -26,5 +33,6 @@ m ubuntu audio
 m ubuntu dip
 m ubuntu video
 m ubuntu plugdev
+{% endif %}
 # removed: removed-test-package
 u removed 850

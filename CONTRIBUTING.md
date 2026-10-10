@@ -32,9 +32,10 @@ distribution in [`tests/images`](tests/images):
 
 The `just test-*` recipes run `cargo xtask test <suite>`. This command builds
 `bootc-imagectl` from the working tree, builds each image with it, then runs
-the suite's test binary in the image. `--image <name>` limits the run to
-one image, e.g. `just test-vm --image fedora`. Other arguments after the
-suite go to the test binary, for example a test name filter.
+the suite's test binary in the image. Each image is also built as a
+`-homed` variant without a regular user. `--image <tag>` limits the run to
+one image, e.g. `just test-vm --image fedora-homed`. Other arguments after
+the suite go to the test binary, for example a test name filter.
 
 Images are built with Podman. `--build-option` (or
 `BOOTC_IMAGECTL_BUILD_OPTIONS`) passes an option to `podman build`, such as a
@@ -46,14 +47,15 @@ The install tests format the root with ext4. Set
 
 When an install test fails, the logs of the booted system are in
 `target/debug/install`, which contains `console.log`, `vmspawn.log` and
-`journal`. The journal can be read with
-`journalctl --directory=target/debug/install/journal`.
+`vm.journal`. The journal can be read with
+`journalctl --file=target/debug/install/vm.journal`.
 
 ### Writing tests
 
-A test for one image goes in the suite's module named after the image, such
-as `tests/vm/fedora.rs`. A check that applies to every image should share
-the same test name in each module and call a shared function.
+A test for one image goes in the suite's module named after its tag, such
+as `tests/vm/fedora.rs` or `tests/install/fedora_homed.rs`. A check that
+applies to every image should share the same test name in each module and
+call a shared function.
 
 ## Adding a distribution
 
@@ -62,8 +64,10 @@ A distribution needs:
 - A backend in [`src/distro`](src/distro) that implements the `Distro` trait,
   selected by its os-release `ID` in [`src/distro.rs`](src/distro.rs).
   Derivatives that list it in `ID_LIKE` in `/etc/os-release` may also use it.
-- A test image in `tests/images/<name>`, with its sysusers lock file.
-- A module per test suite in `tests/*/<name>.rs`.
+- A test image in `tests/images/<name>`, with its sysusers lock file. `.j2`
+  files are templates rendered with `homed` set for the homed variant.
+- A module per test suite in `tests/*/<name>.rs`, and `<name>_homed.rs` for
+  the homed variant.
 
 ## Commits
 

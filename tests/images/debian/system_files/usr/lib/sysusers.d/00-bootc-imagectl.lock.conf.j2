@@ -15,8 +15,16 @@ g sgx 994
 g clock 993
 g kvm 992
 g render 991
+# package: dbus-system-bus-common
+g messagebus 988
+u messagebus 988 "System Message Bus" /nonexistent /usr/sbin/nologin
+# package: polkitd
+g polkitd 987
+u polkitd 987 "User for polkitd" / /usr/sbin/nologin
+{% if not homed %}
 # package: -
 u debian 1000 "Debian user" /home/debian /bin/bash
 m debian sudo
+{% endif %}
 # removed: removed-test-package
 u removed 850
