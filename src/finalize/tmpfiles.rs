@@ -4,18 +4,17 @@
 
 use std::collections::HashSet;
 use std::fmt::{self, Write};
+use std::process::Command;
 
 use anyhow::{Context, Result};
-use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 use tracing::debug;
 
+use crate::command::CommandRunExt;
+
 /// Where packages install their tmpfiles.d files. Generated files go here too.
 pub(super) const USR_TMPFILES_DIR: &str = "usr/lib/tmpfiles.d";
-
-/// Where administrators put their own tmpfiles.d files.
-const ETC_TMPFILES_DIR: &str = "etc/tmpfiles.d";
 
 /// Specifiers systemd expands to a directory at the start of a tmpfiles.d
 /// path.
@@ -105,25 +104,25 @@ fn expand_specifier(path: &str) -> String {
         .unwrap_or_else(|| path.to_owned())
 }
 
-/// Every path the tmpfiles.d files in the image declare.
-pub(super) fn declared_paths(root: &Dir) -> Result<HashSet<String>> {
-    let mut declared = HashSet::new();
-    for dir in [USR_TMPFILES_DIR, ETC_TMPFILES_DIR] {
-        let Some(confs) = root.open_dir_optional(dir)? else {
-            continue;
-        };
-        for entry in confs.entries()? {
-            let name = entry?.file_name()?;
-            if Utf8Path::new(&name).extension() != Some("conf") {
-                continue;
-            }
-            let content = confs
-                .read_to_string(&name)
-                .with_context(|| format!("reading /{dir}/{name}"))?;
-            declared.extend(content.lines().filter_map(entry_path).map(expand_specifier));
-        }
-    }
-    Ok(declared)
+/// The tmpfiles.d files of the rootfs at `/`, merged as systemd-tmpfiles
+/// reads them.
+///
+/// # Errors
+///
+/// Fails if systemd-tmpfiles fails.
+pub(super) fn cat_config() -> Result<String> {
+    Command::new("systemd-tmpfiles")
+        .args(["--root=/", "--cat-config"])
+        .output_string()
+}
+
+/// Every path the tmpfiles.d `config` declares.
+pub(super) fn declared_paths(config: &str) -> HashSet<String> {
+    config
+        .lines()
+        .filter_map(entry_path)
+        .map(expand_specifier)
+        .collect()
 }
 
 /// Patch the tmpfiles.d files systemd ships to match the toplevel symlinks.
@@ -237,44 +236,22 @@ mod tests {
     }
 
     #[test]
-    fn collects_declared_paths_from_both_directories() -> Result<()> {
-        let root = rootfs()?;
-        root.create_dir_all(USR_TMPFILES_DIR)?;
-        root.create_dir_all(ETC_TMPFILES_DIR)?;
-        root.write(
-            format!("{USR_TMPFILES_DIR}/var.conf"),
-            indoc! {"
-                # comment
+    fn collects_declared_paths() {
+        let declared = declared_paths(indoc! {"
+            # /usr/lib/tmpfiles.d/var.conf
+            # comment
 
-                d /var/log 0755 - - -
-                d %S/containers 0755 root root -
-                L /var/lock - - - - ../run/lock
-            "},
-        )?;
-        root.write(
-            format!("{ETC_TMPFILES_DIR}/local.conf"),
-            "d /var/local/x 0755 - - -\n",
-        )?;
-        root.write(
-            format!("{USR_TMPFILES_DIR}/README"),
-            "d /var/not-a-conf 0755 - - -\n",
-        )?;
-
-        let declared = declared_paths(&root)?;
-
+            d /var/log 0755 - - -
+            d %S/containers 0755 root root -
+            L /var/lock - - - - ../run/lock
+        "});
         assert_eq!(
             declared,
-            [
-                "/var/log",
-                "/var/lib/containers",
-                "/var/lock",
-                "/var/local/x"
-            ]
-            .map(String::from)
-            .into_iter()
-            .collect()
+            ["/var/log", "/var/lib/containers", "/var/lock"]
+                .map(String::from)
+                .into_iter()
+                .collect()
         );
-        Ok(())
     }
 
     #[test]

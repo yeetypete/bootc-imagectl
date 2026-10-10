@@ -74,7 +74,9 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
     distro
         .relocate_package_state(root)
         .context("relocating the package state")?;
-    write_var_tmpfiles(root, &UsersCache::new()).context("generating /var tmpfiles.d entries")?;
+    let declared = tmpfiles::declared_paths(&tmpfiles::cat_config()?);
+    write_var_tmpfiles(root, &UsersCache::new(), &declared)
+        .context("generating /var tmpfiles.d entries")?;
     empty_var(root).context("emptying /var")?;
     write_var_mount_dropin(root).context("writing the var.mount drop-in")?;
     distro
@@ -83,9 +85,13 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
 }
 
 /// Write a tmpfiles.d file for directories and symlinks in /var.
-fn write_var_tmpfiles(root: &Dir, db: &(impl Users + Groups)) -> Result<()> {
+/// `declared` holds the paths the existing tmpfiles.d files declare.
+fn write_var_tmpfiles(
+    root: &Dir,
+    db: &(impl Users + Groups),
+    declared: &HashSet<String>,
+) -> Result<()> {
     debug!("generating /var tmpfiles.d entries");
-    let declared = tmpfiles::declared_paths(root)?;
     let mut entries = BTreeMap::new();
 
     // Files are skipped, tmpfiles.d cannot recreate them.
@@ -104,7 +110,7 @@ fn write_var_tmpfiles(root: &Dir, db: &(impl Users + Groups)) -> Result<()> {
                     .to_str()
                     .with_context(|| format!("the target of {path} is not UTF-8"))?;
                 let entry = tmpfiles::Entry::Symlink { path, target };
-                record(&mut entries, &declared, &entry);
+                record(&mut entries, declared, &entry);
             } else if e.file_type.is_dir() {
                 let meta = e.entry.metadata()?;
                 let (uid, gid) = (meta.uid(), meta.gid());
@@ -124,7 +130,7 @@ fn write_var_tmpfiles(root: &Dir, db: &(impl Users + Groups)) -> Result<()> {
                     user: &user,
                     group: &group,
                 };
-                record(&mut entries, &declared, &entry);
+                record(&mut entries, declared, &entry);
             } else {
                 debug!("dropping {path}, only directories and symlinks are recorded");
             }
@@ -314,17 +320,13 @@ mod tests {
         root.write("var/lib/file", b"files are not recorded")?;
         root.symlink("lib", "var/link")?;
         root.symlink_contents("/var/lib/private", "var/absolute")?;
-        root.create_dir_all(tmpfiles::USR_TMPFILES_DIR)?;
-        root.write(
-            format!("{}/var.conf", tmpfiles::USR_TMPFILES_DIR),
-            indoc! {"
-                d /var/lib 0755 - - -
-                d %C 0755 - - -
-                L /var/run - - - - ../run
-            "},
-        )?;
+        let declared = tmpfiles::declared_paths(indoc! {"
+            d /var/lib 0755 - - -
+            d %C 0755 - - -
+            L /var/run - - - - ../run
+        "});
 
-        write_var_tmpfiles(&root, &db)?;
+        write_var_tmpfiles(&root, &db, &declared)?;
 
         let mode = root.metadata("var")?.mode() & 0o7777;
         assert_eq!(
@@ -346,7 +348,7 @@ mod tests {
         root.create_dir_all("var/lib/x")?;
         let err = format!(
             "{:#}",
-            write_var_tmpfiles(&root, &no_accounts()).unwrap_err()
+            write_var_tmpfiles(&root, &no_accounts(), &HashSet::new()).unwrap_err()
         );
         assert!(err.contains("which no user has"), "{err}");
         Ok(())
@@ -362,7 +364,7 @@ mod tests {
         root.create_dir_all("var/lib/earlier")?;
         root.create_dir_all("var/lib/later")?;
 
-        write_var_tmpfiles(&root, &db)?;
+        write_var_tmpfiles(&root, &db, &tmpfiles::declared_paths(earlier))?;
 
         assert_eq!(
             generated(&root, 1)?,
@@ -380,13 +382,9 @@ mod tests {
         let root = rootfs()?;
         let db = accounts(&root)?;
         root.create_dir_all("var/lib")?;
-        root.create_dir_all(tmpfiles::USR_TMPFILES_DIR)?;
-        root.write(
-            format!("{}/var.conf", tmpfiles::USR_TMPFILES_DIR),
-            "d /var/lib 0755 - - -\n",
-        )?;
+        let declared = tmpfiles::declared_paths("d /var/lib 0755 - - -\n");
 
-        write_var_tmpfiles(&root, &db)?;
+        write_var_tmpfiles(&root, &db, &declared)?;
 
         assert!(!root.exists(generated_path(1)));
         Ok(())
@@ -441,7 +439,7 @@ mod tests {
     #[test]
     fn creates_var_tmp_on_empty_rootfs() -> Result<()> {
         let root = rootfs()?;
-        write_var_tmpfiles(&root, &no_accounts())?;
+        write_var_tmpfiles(&root, &no_accounts(), &HashSet::new())?;
         empty_var(&root)?;
         assert!(root.is_dir("var/tmp"));
         Ok(())
