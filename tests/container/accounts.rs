@@ -1,7 +1,8 @@
 //! Check the accounts finalize moved to /usr/lib/userdb, for every image.
 
 use anyhow::Result;
-use bootc_imagectl::passwd::{Entry, Group, Passwd, Shadow};
+use bootc_imagectl::id::Gid;
+use bootc_imagectl::passwd::{Entry, Group, Gshadow, Passwd, Shadow};
 use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 
@@ -36,9 +37,9 @@ pub(crate) fn keeps_removed_accounts_locked() -> Result<()> {
     Ok(())
 }
 
-/// /etc/passwd and /etc/shadow keep only root and nobody, while the moved
+/// The account files in /etc keep only root and nobody, while the moved
 /// users still resolve through NSS with their groups.
-pub(crate) fn moves_users_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
+pub(crate) fn moves_accounts_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
     let root = Dir::from_cap_std(ROOT.try_clone()?);
     let users: Vec<String> = Passwd::read_all(&root)?
         .iter()
@@ -51,17 +52,17 @@ pub(crate) fn moves_users_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
         .collect();
     assert_eq!(shadow, ["root", "nobody"]);
 
-    // Members stay in /etc/group, where systemd-sysusers maintains them.
-    let (name, uid) = accounts.user;
-    let group = Group::read_all(&root)?
-        .into_iter()
-        .find(|group| group.name.as_str() == accounts.group)
-        .expect("the group exists");
-    assert!(
-        group.members.iter().any(|member| member.as_str() == name),
-        "{group}"
-    );
+    let groups = Group::read_all(&root)?;
+    let gids: Vec<Gid> = groups.iter().map(|group| group.gid).collect();
+    assert_eq!(gids, [Gid::ROOT, Gid::NOBODY]);
+    let gshadow: Vec<String> = Gshadow::read_all(&root)?
+        .iter()
+        .map(|entry| entry.name.to_string())
+        .collect();
+    let names: Vec<String> = groups.iter().map(|group| group.name.to_string()).collect();
+    assert_eq!(gshadow, names);
 
+    let (name, uid) = accounts.user;
     let user = uzers::get_user_by_name(name).expect("the user resolves through NSS");
     assert_eq!(user.uid(), uid);
     let groups: Vec<String> = uzers::get_user_groups(name, user.primary_group_id())
@@ -76,7 +77,6 @@ pub(crate) fn moves_users_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
 pub(crate) fn writes_user_records(accounts: &MovedAccounts) -> Result<()> {
     for &(name, uid) in accounts.system_users {
         let record = ROOT.read_to_string(format!("usr/lib/userdb/{name}.user"))?;
-        assert!(record.contains("\"disposition\": \"system\""), "{record}");
         assert!(record.contains(&format!("\"uid\": {uid}")), "{record}");
         assert_eq!(
             ROOT.read_link(format!("usr/lib/userdb/{uid}.user"))?,
@@ -84,6 +84,19 @@ pub(crate) fn writes_user_records(accounts: &MovedAccounts) -> Result<()> {
         );
     }
     assert!(!ROOT.exists("usr/lib/userdb/root.user"));
+    Ok(())
+}
+
+pub(crate) fn writes_group_records(accounts: &MovedAccounts) -> Result<()> {
+    let group = uzers::get_group_by_name(accounts.group).expect("the group resolves through NSS");
+    let gid = group.gid();
+    let record = ROOT.read_to_string(format!("usr/lib/userdb/{}.group", accounts.group))?;
+    assert!(record.contains(&format!("\"gid\": {gid}")), "{record}");
+    assert_eq!(
+        ROOT.read_link(format!("usr/lib/userdb/{gid}.group"))?,
+        std::path::Path::new(&format!("{}.group", accounts.group))
+    );
+    assert!(!ROOT.exists("usr/lib/userdb/root.group"));
     Ok(())
 }
 
@@ -117,7 +130,7 @@ pub(crate) fn writes_privileged_records(accounts: &MovedAccounts) -> Result<()> 
 }
 
 /// The regular user has a membership file for its primary group and for
-/// [`MovedAccounts::group`]. root has none.
+/// [`MovedAccounts::group`], and root for its own group.
 pub(crate) fn writes_membership_files(accounts: &MovedAccounts) -> Result<()> {
     let (name, _) = accounts.user;
     assert_eq!(
@@ -128,7 +141,7 @@ pub(crate) fn writes_membership_files(accounts: &MovedAccounts) -> Result<()> {
         "usr/lib/userdb/{name}:{}.membership",
         accounts.group
     )));
-    assert!(!ROOT.exists("usr/lib/userdb/root:root.membership"));
+    assert!(ROOT.exists("usr/lib/userdb/root:root.membership"));
     Ok(())
 }
 
