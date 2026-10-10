@@ -82,7 +82,19 @@ FROM image AS finalized
 
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
+{% if secureboot %}
+# finalize signs systemd-boot and stages the certificate for enrollment.
+# The certificate is bind-mounted so a new key invalidates the cache. The
+# key goes in /run, since bootc's lint flags podman's /run/secrets.
+RUN --mount=type=secret,id=secureboot_key,target=/run/secureboot.key \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
+    /usr/libexec/bootc-imagectl finalize \
+      --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf \
+      --secureboot-private-key /run/secureboot.key \
+      --secureboot-certificate /run/secureboot.crt
+{% else %}
 RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
+{% endif %}
 
 
 # The UKI embeds the kernel and initramfs.
@@ -98,12 +110,24 @@ RUN bootc container split-kernel-and-rootfs --output /kernel && \
 FROM rootfs AS uki
 
 # The kernel and initramfs come from finalized, the systemd-stub from rootfs.
+{% if secureboot %}
+# The UKI is signed with the same key as systemd-boot.
+{% endif %}
 RUN --mount=type=bind,from=rootfs,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
+{% if secureboot %}
+    --mount=type=secret,id=secureboot_key,target=/run/secureboot.key \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
+{% endif %}
     kver="$(ls /kernel)" && \
     mkdir /uki && \
     bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
       -- --stub /target/usr/lib/systemd/boot/efi/linuxx64.efi.stub \
+{% if secureboot %}
+      --signtool systemd-sbsign --no-sign-kernel \
+      --secureboot-private-key /run/secureboot.key \
+      --secureboot-certificate /run/secureboot.crt \
+{% endif %}
       --output "/uki/${kver}.efi"
 
 

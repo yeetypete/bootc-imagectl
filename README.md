@@ -43,7 +43,7 @@ is built:
 
 ## Building an image
 
-See [`tests/images/fedora/Containerfile`](tests/images/fedora/Containerfile)
+See [`tests/images/fedora/Containerfile.j2`](tests/images/fedora/Containerfile.j2)
 for a complete example. [`tests/images`](tests/images) has one for each
 supported distribution.
 
@@ -52,6 +52,18 @@ file must contain. Add them to `00-bootc-imagectl.lock.conf`, commit it next to
 the Containerfile, and rebuild. Later builds will fail in the same manner whenever
 a package adds a user or group not fixed in the lock file. This is your signal to
 add the new user or group to the lock file and rebuild.
+
+## Secure Boot
+
+To sign the image for Secure Boot, pass a key as a build secret and its
+certificate to `finalize` and `bootc container ukify` (see the
+[example](tests/images/fedora/Containerfile.j2)).
+`finalize` signs systemd-boot and stages the certificate for systemd-boot to
+enroll. This needs systemd 257 or newer.
+
+To enroll the key, put the firmware in setup mode, then pick
+*Enroll Secure Boot keys: auto* in the boot menu. This replaces the firmware's
+keys, including Microsoft's.
 
 ## Installing
 
