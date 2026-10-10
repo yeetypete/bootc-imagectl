@@ -96,11 +96,54 @@ fn link_state(root: &Dir) -> Result<()> {
 
 /// Debian and derivatives, which use dpkg and apt.
 #[derive(Debug)]
-pub(super) struct Debian;
+pub(super) struct Debian {
+    name: &'static str,
+    default_user_groups: &'static [&'static str],
+}
+
+pub(super) const DEBIAN: Debian = Debian {
+    name: "debian",
+    default_user_groups: &[
+        "audio",
+        "cdrom",
+        "dip",
+        "floppy",
+        "video",
+        "plugdev",
+        "netdev",
+        "scanner",
+        "bluetooth",
+        "debian-tor",
+        "lpadmin",
+    ],
+};
+
+pub(super) const UBUNTU: Debian = Debian {
+    name: "ubuntu",
+    default_user_groups: &[
+        "adm",
+        "cdrom",
+        "dip",
+        "lpadmin",
+        "plugdev",
+        "sambashare",
+        "debian-tor",
+        "users",
+        "lxd",
+    ],
+};
 
 impl Distro for Debian {
     fn name(&self) -> &'static str {
-        "debian"
+        self.name
+    }
+
+    fn admin_group(&self) -> &'static str {
+        "sudo"
+    }
+
+    fn default_user_groups(&self) -> &'static [&'static str] {
+        self.default_user_groups
     }
 
     /// Stage the kernel where bootc looks for it. The kernel package installs
@@ -289,7 +332,7 @@ mod tests {
         let root = rootfs()?;
         root.create_dir_all("var/lib/dpkg")?;
         root.write("var/lib/dpkg/status", "Package: bash\n")?;
-        Debian.relocate_package_state(&root)?;
+        DEBIAN.relocate_package_state(&root)?;
         assert_eq!(
             root.read_to_string("usr/lib/sysimage/dpkg/status")?,
             "Package: bash\n"
@@ -306,7 +349,7 @@ mod tests {
         assert!(root.is_file("var/lib/dpkg/status"));
 
         // A second run leaves the moved state alone.
-        Debian.relocate_package_state(&root)?;
+        DEBIAN.relocate_package_state(&root)?;
         assert!(root.is_file("var/lib/dpkg/status"));
         Ok(())
     }
@@ -314,7 +357,7 @@ mod tests {
     #[test]
     fn fails_without_database() -> Result<()> {
         let root = rootfs()?;
-        let err = Debian.relocate_package_state(&root).unwrap_err();
+        let err = DEBIAN.relocate_package_state(&root).unwrap_err();
         assert!(err.to_string().contains("/var/lib/dpkg"), "{err}");
         Ok(())
     }
@@ -323,7 +366,7 @@ mod tests {
     fn restores_package_state() -> Result<()> {
         let root = rootfs()?;
         root.create_dir("var")?;
-        Debian.restore_package_state(&root)?;
+        DEBIAN.restore_package_state(&root)?;
         assert!(root.is_dir("var/log/apt"));
         Ok(())
     }
@@ -334,19 +377,19 @@ mod tests {
         root.create_dir_all("boot")?;
         root.create_dir_all("usr/lib/modules/7.0.0-31-generic")?;
         root.write("boot/vmlinuz-7.0.0-31-generic", "kernel")?;
-        Debian.stage_kernel(&root, "7.0.0-31-generic")?;
+        DEBIAN.stage_kernel(&root, "7.0.0-31-generic")?;
         assert_eq!(
             root.read_to_string("usr/lib/modules/7.0.0-31-generic/vmlinuz")?,
             "kernel"
         );
         // A kernel already staged, or none installed, is left alone.
         root.write("boot/vmlinuz-7.0.0-31-generic", "newer")?;
-        Debian.stage_kernel(&root, "7.0.0-31-generic")?;
+        DEBIAN.stage_kernel(&root, "7.0.0-31-generic")?;
         assert_eq!(
             root.read_to_string("usr/lib/modules/7.0.0-31-generic/vmlinuz")?,
             "kernel"
         );
-        Debian.stage_kernel(&root, "7.0.0-32-generic")?;
+        DEBIAN.stage_kernel(&root, "7.0.0-32-generic")?;
         Ok(())
     }
 
@@ -360,7 +403,7 @@ mod tests {
         root.symlink("ssl-cert-snakeoil.pem", "etc/ssl/certs/abcd1234.0")?;
         root.write("etc/ssl/certs/ca-certificates.crt", "keep")?;
         root.create_dir_all(".rock")?;
-        Debian.remove_machine_identity(&root)?;
+        DEBIAN.remove_machine_identity(&root)?;
         assert_eq!(root.read_dir("etc/ssl/certs")?.count(), 1);
         assert!(!root.exists("etc/ssl/private/ssl-cert-snakeoil.key"));
         assert!(!root.exists(".rock"));

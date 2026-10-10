@@ -21,6 +21,10 @@ impl Distro for Fedora {
         "fedora"
     }
 
+    fn admin_group(&self) -> &'static str {
+        "wheel"
+    }
+
     /// rpm and dnf already keep their state under /usr, so only check that
     /// the database is there.
     fn relocate_package_state(&self, root: &Dir) -> Result<()> {

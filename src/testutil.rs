@@ -37,6 +37,14 @@ impl Distro for TestDistro {
         "test"
     }
 
+    fn admin_group(&self) -> &'static str {
+        "wheel"
+    }
+
+    fn default_user_groups(&self) -> &'static [&'static str] {
+        &["adm"]
+    }
+
     fn relocate_package_state(&self, _root: &Dir) -> Result<()> {
         Ok(())
     }

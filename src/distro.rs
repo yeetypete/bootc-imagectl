@@ -53,6 +53,14 @@ pub trait Distro: std::fmt::Debug {
     /// Lowercase name for logs and errors.
     fn name(&self) -> &'static str;
 
+    /// The group whose members administer the system, e.g. through sudo.
+    fn admin_group(&self) -> &'static str;
+
+    /// Further groups the distribution's installer gives the first user.
+    fn default_user_groups(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Put the kernel image at `/usr/lib/modules/<kver>/vmlinuz`, where bootc
     /// looks for it. Distributions whose kernel package installs it there
     /// need no implementation.
@@ -115,7 +123,8 @@ pub trait Distro: std::fmt::Debug {
 fn from_id(id: &str) -> Option<&'static dyn Distro> {
     match id {
         "arch" => Some(&arch::Arch),
-        "debian" => Some(&debian::Debian),
+        "debian" => Some(&debian::DEBIAN),
+        "ubuntu" => Some(&debian::UBUNTU),
         "fedora" => Some(&fedora::Fedora),
         _ => None,
     }
@@ -172,7 +181,9 @@ mod tests {
         let root = with_os_release("ID=debian\n")?;
         assert_eq!(detect(&root)?.name(), "debian");
         let root = with_os_release("ID=ubuntu\nID_LIKE=debian\n")?;
-        assert_eq!(detect(&root)?.name(), "debian");
+        assert_eq!(detect(&root)?.name(), "ubuntu");
+        let root = with_os_release("ID=linuxmint\nID_LIKE=\"ubuntu debian\"\n")?;
+        assert_eq!(detect(&root)?.name(), "ubuntu");
         Ok(())
     }
 

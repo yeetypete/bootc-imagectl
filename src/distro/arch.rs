@@ -43,6 +43,10 @@ impl Distro for Arch {
         "arch"
     }
 
+    fn admin_group(&self) -> &'static str {
+        "wheel"
+    }
+
     fn relocate_package_state(&self, root: &Dir) -> Result<()> {
         move_database(root)?;
         remove_indexes(root)
