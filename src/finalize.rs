@@ -23,6 +23,7 @@ mod lint;
 mod presets;
 mod systemd;
 mod tmpfiles;
+mod units;
 mod var;
 
 /// Run the `finalize` subcommand.
