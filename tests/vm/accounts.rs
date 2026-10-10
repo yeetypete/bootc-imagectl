@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context as _, Result};
 use bootc_imagectl::command::CommandRunExt;
+use bootc_imagectl::id::Gid;
 use bootc_imagectl::passwd::{Entry as _, Group, Passwd};
 use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs_utf8::Dir;
@@ -14,7 +15,7 @@ use rustix::time::{ClockId, clock_gettime};
 pub(crate) struct MovedUser {
     pub(crate) name: &'static str,
     pub(crate) uid: u32,
-    /// A group the user is a member of through /etc/group.
+    /// A group the user is a member of through a membership file.
     pub(crate) group: &'static str,
     pub(crate) password: &'static str,
     /// A system user the image moved too, by name and UID.
@@ -72,7 +73,7 @@ pub(crate) fn accepts_password(user: &MovedUser) -> Result<()> {
 
 /// The first boot, including systemd-sysusers, left the account files in
 /// /etc unchanged.
-pub(crate) fn account_files_unchanged(user: &MovedUser) -> Result<()> {
+pub(crate) fn account_files_unchanged() -> Result<()> {
     let result = Command::new("systemctl")
         .args(["show", "-P", "Result", "systemd-sysusers.service"])
         .output_string()?;
@@ -92,18 +93,11 @@ pub(crate) fn account_files_unchanged(user: &MovedUser) -> Result<()> {
     let users = Passwd::read_all(&root)?;
     let names: Vec<&str> = users.iter().map(|user| user.name.as_str()).collect();
     assert_eq!(names, ["root", "nobody"]);
-    let groups = Group::read_all(&root)?;
-    let group = groups
+    let gids: Vec<Gid> = Group::read_all(&root)?
         .iter()
-        .find(|group| group.name.as_str() == user.group)
-        .expect("the group exists");
-    assert!(
-        group
-            .members
-            .iter()
-            .any(|member| member.as_str() == user.name),
-        "{group}"
-    );
+        .map(|group| group.gid)
+        .collect();
+    assert_eq!(gids, [Gid::ROOT, Gid::NOBODY]);
     Ok(())
 }
 

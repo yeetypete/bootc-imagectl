@@ -13,7 +13,8 @@ groups created during a bootc image build.
 | System account | A user created in the system range with `useradd --system`. | useradd(8) |
 | NSS | The Name Service Switch, glibc's mechanism for looking up users and groups from the sources listed in `/etc/nsswitch.conf`. nss-systemd is the source that resolves lookups from systemd's user database. | nsswitch.conf(5), nss-systemd(8) |
 | User record | The JSON description of a user defined by systemd. | [User Record](https://systemd.io/USER_RECORD/) |
-| Drop-in directory | A directory such as `/usr/lib/userdb` from which systemd-userdbd reads user records. | systemd-userdbd(8) |
+| Group record | The JSON description of a group defined by systemd. | [Group Record](https://systemd.io/GROUP_RECORD/) |
+| Drop-in directory | A directory such as `/usr/lib/userdb` from which systemd-userdbd reads user and group records. | systemd-userdbd(8) |
 | Membership file | A file `<user>:<group>.membership` in a drop-in directory that makes a user a member of a group. | nss-systemd(8) |
 | Privileged user record | A file `<name>.user-privileged` next to a user record, readable only by root, that holds the fields of the record only root may see, such as the password hash. | systemd-userdbd(8) |
 
@@ -39,15 +40,15 @@ This creates the following problems:
 - Every user and group is created with a fixed UID and GID from a sysusers
   lock file in the image, before any package is installed. The build fails if
   a package creates a user or group not present in sysusers.d.
-- Users are stored as user records under `/usr/lib/userdb`, with a
-  membership file for each group they belong to, as nss-systemd requires.
-  `/usr` is tracked in the bootc image, so the records on a system follow the
-  image on upgrade.
+- Users and groups are stored as user and group records under
+  `/usr/lib/userdb`, with a membership file for each group a user belongs
+  to. `/usr` is tracked in the bootc image, so the records on a system
+  follow the image on upgrade.
+- `/etc/passwd`, `/etc/shadow`, `/etc/group` and `/etc/gshadow` keep only
+  `root` and `nobody`. The booted system creates no accounts: every account
+  comes from the image.
 - The accounts of a removed package stay in the image, locked, so that no
   later account takes their IDs.
-- Groups and their member lists stay in `/etc/group`, where
-  `systemd-sysusers` maintains them at boot and an administrator or an
-  installer can still add users to them.
 
 ## Goals
 
@@ -158,7 +159,7 @@ flowchart TD
    the sysusers lock file finds it already created and keeps its UID and GID.
    A package whose user or group is not in the sysusers lock file allocates a
    free UID or GID.
-3. `finalize` writes the user records and membership files. If a package
+3. `finalize` writes the user and group records and membership files. If a package
    allocated a user or group the sysusers lock file does not specify, the
    build fails and prints the lines to add. The author appends them and
    rebuilds. On the first build the file does not exist yet and every line
@@ -177,12 +178,13 @@ find the users `finalize` moved.
 Building an image `FROM` an image that `finalize` already processed is a goal,
 but is not supported yet. The following problems need to be solved:
 
-- The parent's users are records in `/usr/lib/userdb`, not entries in
-  `/etc/passwd`. rpm reads `/etc/passwd` directly, so it installs a file the
-  package assigns to one of the parent's users as owned by root instead.
+- The parent's users and groups are records in `/usr/lib/userdb`, not
+  entries in `/etc/passwd` and `/etc/group`. rpm reads these files directly,
+  so it installs a file the package assigns to one of the parent's accounts
+  as owned by root instead.
 - dpkg installs such a file with the right owner, but `finalize`'s ownership
   [check](#checks) fails, because it only looks up the file's owner in
-  `/etc/passwd`.
+  `/etc/passwd` and `/etc/group`.
 - The derived build needs a sysusers lock file of its own, which must not
   reuse an ID of the parent's, and `finalize` must report missing lines only
   for that file.
@@ -192,8 +194,9 @@ but is not supported yet. The following problems need to be solved:
 `bootc-imagectl finalize` handles users and groups before it builds the initramfs.
 It performs the following steps:
 
-1. Reads `/etc/passwd` and `/etc/group`, and every sysusers.d configuration
-   file in the directories `systemd-sysusers` reads.
+1. Reads `/etc/passwd`, `/etc/shadow`, `/etc/group` and `/etc/gshadow`, and
+   every sysusers.d configuration file in the directories `systemd-sysusers`
+   reads.
 2. Runs the [account checks](#checks).
 3. Writes a user record for every user other than `root` and `nobody` to
    `/usr/lib/userdb/<name>.user`, with `uid`, `gid`, `realName`,
@@ -202,23 +205,24 @@ It performs the following steps:
    password hash, writes it to the privileged user record
    `/usr/lib/userdb/<name>.user-privileged` with mode `0600`. Otherwise sets
    `locked` `true`.
-4. Writes an empty `/usr/lib/userdb/<user>:<group>.membership` file for
-   every user with a record and each group it belongs to.
-5. Removes the users with records from `/etc/passwd` and `/etc/shadow`, and
-   checks that they and their memberships still resolve through NSS.
+4. Writes a group record for every group other than `root` and `nobody` to
+   `/usr/lib/userdb/<name>.group`, with `gid` from the group entry, and links
+   `/usr/lib/userdb/<GID>.group` to it.
+5. Writes an empty `/usr/lib/userdb/<user>:<group>.membership` file for
+   every user and each group it belongs to, except `root` and `nobody` in
+   their own groups.
+6. Removes the users and groups with records from `/etc/passwd`,
+   `/etc/shadow`, `/etc/group` and `/etc/gshadow`, and checks that they and
+   their memberships still resolve through NSS.
 
 ### Booted system
 
-- nss-systemd resolves the users from `/usr/lib/userdb`, by name and by UID,
-  their shadow entries from the privileged user records, and their
-  memberships from the membership files, merged with the member lists of
-  `/etc/group`. PAM verifies passwords through NSS. This requires
-  `systemd` in the `passwd`, `group` and `shadow` databases of
-  `/etc/nsswitch.conf`, which Arch Linux, Debian and Fedora configure by
-  default.
-- `systemd-sysusers.service` runs at boot, finds every user through NSS,
-  creates any group missing from `/etc/group` with the specified GID, and
-  adds any missing member.
+- nss-systemd resolves the users and groups from `/usr/lib/userdb`, by name
+  and by ID, the users' shadow entries from the privileged user records, and
+  their memberships from the membership files. PAM verifies passwords
+  through NSS. This requires `systemd` in the `passwd`, `group` and `shadow`
+  databases of `/etc/nsswitch.conf`, which Arch Linux, Debian and Fedora
+  configure by default.
 - The initramfs contains a copy of `/usr/lib/userdb` and the nss-systemd
   module. This ensures that services that start before the root filesystem is
   mounted resolve the same users as the booted system.
@@ -227,7 +231,7 @@ It performs the following steps:
 
 | Change in the image | System after upgrade |
 | --- | --- |
-| Package added | Its record and membership files are part of the new `/usr`. `systemd-sysusers` creates its group and memberships in `/etc/group` at boot. |
+| Package added | Its records and membership files are part of the new `/usr`. |
 | Package removed, its block marked `# removed:` in the sysusers lock file | Its users stay, locked, with their IDs. |
 | Package removed, its block kept in the sysusers lock file | The build fails the [stale entry check](#checks). No upgrade can occur. |
 | Packages reordered | No change. Every UID and GID is locked by the sysusers lock file. |
@@ -243,7 +247,7 @@ further instructions for the developer.
 | Check | Condition |
 | --- | --- |
 | Drift | Every user and group in `/etc` is specified with the UID or GID the build allocated. |
-| Resolution | Every user written as a record resolves through NSS. |
+| Resolution | Every user and group written as a record resolves through NSS, and every user with its memberships. |
 | Ownership | Every path under `/usr` and `/etc` not owned by `root:root` resolves to a specified user and group. |
 | Stale entries | A `# package:` block names an installed package or `-`. A `# removed:` block names a package that is not installed. |
 
@@ -262,9 +266,6 @@ package that is not.
 ## Limitations
 
 - The sysusers lock file is state that must be tracked and committed.
-- Groups and their members are not removed from installed systems.
-  `/etc/group` is persistent, so a group the image drops remains on systems
-  that have it, members included.
 - The accounts of removed packages are never removed. They stay, locked, to
   keep their IDs, so an account dropped from an image is not yet gone from
   the system after an upgrade.

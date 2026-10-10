@@ -1,7 +1,8 @@
 //! Check the accounts finalize moved to /usr/lib/userdb, for every image.
 
 use anyhow::Result;
-use bootc_imagectl::passwd::{Entry, Group, Passwd, Shadow};
+use bootc_imagectl::id::Gid;
+use bootc_imagectl::passwd::{Entry, Group, Gshadow, Passwd, Shadow};
 use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 
@@ -36,9 +37,9 @@ pub(crate) fn keeps_removed_accounts_locked() -> Result<()> {
     Ok(())
 }
 
-/// /etc/passwd and /etc/shadow keep only root and nobody, while the moved
+/// The account files in /etc keep only root and nobody, while the moved
 /// users still resolve through NSS with their groups.
-pub(crate) fn moves_users_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
+pub(crate) fn moves_accounts_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
     let root = Dir::from_cap_std(ROOT.try_clone()?);
     let users: Vec<String> = Passwd::read_all(&root)?
         .iter()
@@ -51,17 +52,15 @@ pub(crate) fn moves_users_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
         .collect();
     assert_eq!(shadow, ["root", "nobody"]);
 
-    // Members stay in /etc/group, where systemd-sysusers maintains them.
-    let (name, uid) = accounts.user;
-    let group = Group::read_all(&root)?
-        .into_iter()
-        .find(|group| group.name.as_str() == accounts.group)
-        .expect("the group exists");
-    assert!(
-        group.members.iter().any(|member| member.as_str() == name),
-        "{group}"
-    );
+    let gids: Vec<Gid> = Group::read_all(&root)?
+        .iter()
+        .map(|group| group.gid)
+        .collect();
+    assert_eq!(gids, [Gid::ROOT, Gid::NOBODY]);
+    let gshadow = Gshadow::read_all(&root)?;
+    assert_eq!(gshadow.len(), 2, "{gshadow:?}");
 
+    let (name, uid) = accounts.user;
     let user = uzers::get_user_by_name(name).expect("the user resolves through NSS");
     assert_eq!(user.uid(), uid);
     let groups: Vec<String> = uzers::get_user_groups(name, user.primary_group_id())

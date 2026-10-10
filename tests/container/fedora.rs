@@ -48,8 +48,8 @@ fn keeps_removed_accounts_locked() -> Result<()> {
 }
 
 #[test]
-fn moves_users_out_of_etc_and_resolves_them_through_nss() -> Result<()> {
-    accounts::moves_users_out_of_etc(&FEDORA)
+fn moves_accounts_out_of_etc_and_resolves_them_through_nss() -> Result<()> {
+    accounts::moves_accounts_out_of_etc(&FEDORA)
 }
 
 #[test]
