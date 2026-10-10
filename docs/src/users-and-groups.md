@@ -44,7 +44,7 @@ This creates the following problems:
   `/usr/lib/userdb`, with a membership file for each group a user belongs
   to. `/usr` is tracked in the bootc image, so the records on a system
   follow the image on upgrade.
-- `/etc/passwd`, `/etc/shadow`, `/etc/group` and `/etc/gshadow` keep only
+- `/etc/passwd`, `/etc/shadow`, `/etc/group` and `/etc/gshadow` contain only
   `root` and `nobody`. The booted system creates no accounts: every account
   comes from the image.
 - The accounts of a removed package stay in the image, locked, so that no

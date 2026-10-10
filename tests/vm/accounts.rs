@@ -6,8 +6,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context as _, Result};
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::id::Gid;
-use bootc_imagectl::passwd::{Entry as _, Group, Passwd};
+use bootc_imagectl::testing;
 use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use rustix::time::{ClockId, clock_gettime};
@@ -90,15 +89,7 @@ pub(crate) fn account_files_unchanged() -> Result<()> {
     }
 
     let root = Dir::open_ambient_dir("/", ambient_authority())?;
-    let users = Passwd::read_all(&root)?;
-    let names: Vec<&str> = users.iter().map(|user| user.name.as_str()).collect();
-    assert_eq!(names, ["root", "nobody"]);
-    let gids: Vec<Gid> = Group::read_all(&root)?
-        .iter()
-        .map(|group| group.gid)
-        .collect();
-    assert_eq!(gids, [Gid::ROOT, Gid::NOBODY]);
-    Ok(())
+    testing::etc_contains_only_root_and_nobody(&root)
 }
 
 /// The time the system booted, in seconds since the epoch.

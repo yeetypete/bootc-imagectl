@@ -1,8 +1,7 @@
 //! Check the accounts finalize moved to /usr/lib/userdb, for every image.
 
 use anyhow::Result;
-use bootc_imagectl::id::Gid;
-use bootc_imagectl::passwd::{Entry, Group, Gshadow, Passwd, Shadow};
+use bootc_imagectl::testing;
 use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 
@@ -37,30 +36,10 @@ pub(crate) fn keeps_removed_accounts_locked() -> Result<()> {
     Ok(())
 }
 
-/// The account files in /etc keep only root and nobody, while the moved
+/// The account files in /etc contain only root and nobody, while the moved
 /// users still resolve through NSS with their groups.
 pub(crate) fn moves_accounts_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
-    let root = Dir::from_cap_std(ROOT.try_clone()?);
-    let users: Vec<String> = Passwd::read_all(&root)?
-        .iter()
-        .map(|user| user.name.to_string())
-        .collect();
-    assert_eq!(users, ["root", "nobody"]);
-    let shadow: Vec<String> = Shadow::read_all(&root)?
-        .iter()
-        .map(|entry| entry.name.to_string())
-        .collect();
-    assert_eq!(shadow, ["root", "nobody"]);
-
-    let groups = Group::read_all(&root)?;
-    let gids: Vec<Gid> = groups.iter().map(|group| group.gid).collect();
-    assert_eq!(gids, [Gid::ROOT, Gid::NOBODY]);
-    let gshadow: Vec<String> = Gshadow::read_all(&root)?
-        .iter()
-        .map(|entry| entry.name.to_string())
-        .collect();
-    let names: Vec<String> = groups.iter().map(|group| group.name.to_string()).collect();
-    assert_eq!(gshadow, names);
+    testing::etc_contains_only_root_and_nobody(&Dir::from_cap_std(ROOT.try_clone()?))?;
 
     let (name, uid) = accounts.user;
     let user = uzers::get_user_by_name(name).expect("the user resolves through NSS");

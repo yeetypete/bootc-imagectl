@@ -7,6 +7,8 @@ pub mod id;
 pub mod install;
 pub mod passwd;
 pub mod sysusers;
+#[cfg(any(feature = "container", feature = "vm"))]
+pub mod testing;
 pub mod userdb;
 
 #[cfg(test)]
