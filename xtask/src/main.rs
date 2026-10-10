@@ -4,12 +4,13 @@ use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Args, Parser, ValueEnum};
 use serde_json::{Value, json};
 use xshell::{Shell, cmd};
 
 mod container;
+mod images;
 mod install;
 mod vm;
 
@@ -37,13 +38,13 @@ enum Task {
     Vm {
         #[command(flatten)]
         build: Build,
-        /// The image's name, e.g. `ubuntu`.
+        /// The image's tag, e.g. `ubuntu` or `ubuntu-homed`.
         image: String,
     },
     /// Print the matrix of test jobs as JSON, consumable by GitHub Actions.
     Matrix,
-    /// Run a test binary against each image in tests/images. Cargo runs
-    /// this through `test`.
+    /// Run a test binary against each variant of the images in
+    /// tests/images. Cargo runs this through `test`.
     #[command(hide = true)]
     Runner {
         #[command(flatten)]
@@ -74,7 +75,7 @@ enum Suite {
 #[derive(Debug, Args)]
 struct Build {
     /// An option passed to the builder, such as a cache. `{image}` is
-    /// replaced by the image name.
+    /// replaced by the image name, which its variants share.
     #[arg(long = "build-option", env = BUILD_OPTIONS_ENV, value_delimiter = ' ', allow_hyphen_values = true)]
     options: Vec<String>,
 }
@@ -82,15 +83,15 @@ struct Build {
 /// Which images in tests/images the tests run against.
 #[derive(Debug, Args)]
 struct Selection {
-    /// Only run against this image, e.g. `fedora`. May be repeated.
-    /// Defaults to every image.
+    /// Only run against the image with this tag, e.g. `fedora` or
+    /// `fedora-homed`. May be repeated. Defaults to every image.
     #[arg(long = "image")]
     images: Vec<String>,
 }
 
 impl Build {
-    /// Build the image in `dir` as `image`, with the bootc-imagectl binary
-    /// from `target`.
+    /// Build the image `name` rendered into `dir` as `image`, with the
+    /// bootc-imagectl binary from `target`.
     fn build(&self, sh: &Shell, name: &str, image: &str, dir: &Path, target: &Path) -> Result<()> {
         let options: Vec<String> = self
             .options
@@ -113,6 +114,15 @@ impl Suite {
             Self::Container => "container",
             Self::Vm => "vm",
             Self::Install => "install",
+        }
+    }
+
+    /// Run the test binary against `image`.
+    fn run(self, sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> Result<()> {
+        match self {
+            Self::Container => container::run(sh, image, binary, args),
+            Self::Vm => vm::run(sh, image, binary, args),
+            Self::Install => install::run(sh, image, binary, args),
         }
     }
 }
@@ -143,10 +153,13 @@ fn main() -> Result<()> {
 
 /// The GitHub Actions matrix of test jobs.
 fn matrix() -> Result<Value> {
-    let names = image_names(&images_dir()?)?;
+    let tags: Vec<String> = images::images(&images_dir()?)?
+        .iter()
+        .map(images::Image::tag)
+        .collect();
     let mut jobs = Vec::new();
     for suite in Suite::value_variants() {
-        for image in &names {
+        for image in &tags {
             let name = format!("test-{}-{image}", suite.name());
             match suite {
                 Suite::Install => jobs.extend(install::FILESYSTEMS.map(|filesystem| {
@@ -176,9 +189,9 @@ fn test(
     suite: Suite,
     args: &[OsString],
 ) -> Result<()> {
-    let names = image_names(&images_dir()?)?;
-    for name in &selection.images {
-        check_image(&names, name)?;
+    let variants = images::images(&images_dir()?)?;
+    for tag in &selection.images {
+        find_image(&variants, tag)?;
     }
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let name = suite.name();
@@ -214,30 +227,20 @@ fn images_dir() -> Result<PathBuf> {
         .join("tests/images"))
 }
 
-/// The sorted names of the test images.
-fn image_names(images: &Path) -> Result<Vec<String>> {
-    let mut names: Vec<String> = std::fs::read_dir(images)
-        .with_context(|| format!("reading {}", images.display()))?
-        .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
-        .collect::<Result<_>>()?;
-    names.sort();
-    Ok(names)
+/// The image tagged `tag` among `variants`.
+fn find_image<'a>(variants: &'a [images::Image], tag: &str) -> Result<&'a images::Image> {
+    variants
+        .iter()
+        .find(|image| image.tag() == tag)
+        .with_context(|| {
+            let tags: Vec<String> = variants.iter().map(images::Image::tag).collect();
+            format!("no image tagged {tag}, select one of: {}", tags.join(", "))
+        })
 }
 
-/// Fail unless `name` is one of the image `names`.
-fn check_image(names: &[String], name: &str) -> Result<()> {
-    if !names.iter().any(|other| other == name) {
-        bail!(
-            "no image is named {name}, select one of: {}",
-            names.join(", ")
-        );
-    }
-    Ok(())
-}
-
-/// Build each selected image in tests/images and run the test binary
-/// against it. The tests of the other images live in modules named after
-/// them and are skipped.
+/// Build each selected variant of the images in tests/images and run the
+/// test binary against it. The tests of the other images live in modules
+/// named after them and are skipped.
 fn run(
     sh: &Shell,
     build: &Build,
@@ -247,24 +250,21 @@ fn run(
     args: &[OsString],
 ) -> Result<()> {
     let images = images_dir()?;
-    let names = image_names(&images)?;
-    let run = match suite {
-        Suite::Container => container::run,
-        Suite::Vm => vm::run,
-        Suite::Install => install::run,
-    };
-    let selected = names
+    let variants = images::images(&images)?;
+    let target = target_dir(binary)?;
+    let selected = variants
         .iter()
-        .filter(|name| selection.images.is_empty() || selection.images.contains(name));
-    for name in selected {
-        let image = format!("{REPOSITORY}:{name}");
-        let dir = images.join(name);
-        let target = target_dir(binary)?;
-        build.build(sh, name, &image, &dir, target)?;
+        .filter(|image| selection.images.is_empty() || selection.images.contains(&image.tag()));
+    for image in selected {
+        let tag = image.tag();
+        let dir = target.join("images").join(&tag);
+        let reference = format!("{REPOSITORY}:{tag}");
+        image.render(&images, &dir)?;
+        build.build(sh, &image.name, &reference, &dir, target)?;
         let mut args = args.to_vec();
-        for other in names.iter().filter(|other| *other != name) {
+        for other in variants.iter().filter(|other| *other != image) {
             args.push("--skip".into());
-            args.push(format!("{other}::").into());
+            args.push(format!("{}::", other.module()).into());
         }
         let color = if std::io::stdout().is_terminal() {
             "always"
@@ -272,23 +272,26 @@ fn run(
             "never"
         };
         args.push(format!("--color={color}").into());
-        run(sh, &image, binary, &args)?;
+        suite.run(sh, &reference, binary, &args)?;
     }
     Ok(())
 }
 
-/// Build bootc-imagectl and the image `name`, then boot it in a VM.
-fn boot(sh: &Shell, build: &Build, name: &str) -> Result<()> {
+/// Build bootc-imagectl and the image tagged `tag`, then boot it in a VM.
+fn boot(sh: &Shell, build: &Build, tag: &str) -> Result<()> {
     let images = images_dir()?;
-    check_image(&image_names(&images)?, name)?;
+    let variants = images::images(&images)?;
+    let image = find_image(&variants, tag)?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     cmd!(sh, "{cargo} build --locked --bin bootc-imagectl").run()?;
     // cargo builds bootc-imagectl next to this binary.
     let xtask = std::env::current_exe()?;
     let target = xtask.parent().context("finding the target directory")?;
-    let image = format!("{REPOSITORY}:{name}");
-    build.build(sh, name, &image, &images.join(name), target)?;
-    vm::boot(&image)
+    let dir = target.join("images").join(tag);
+    let reference = format!("{REPOSITORY}:{tag}");
+    image.render(&images, &dir)?;
+    build.build(sh, &image.name, &reference, &dir, target)?;
+    vm::boot(&reference)
 }
 
 /// The target profile directory holding `binary` and bootc-imagectl.

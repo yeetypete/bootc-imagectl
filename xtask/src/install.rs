@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use rustix::process::{Pid, Signal, kill_process};
+use serde_json::json;
 use xshell::{Shell, cmd};
 
 use crate::{bound_binary, target_dir};
@@ -37,6 +38,15 @@ pub(crate) const FILESYSTEMS: [&str; 2] = ["ext4", "btrfs"];
 
 /// The passphrase of the encrypted root.
 const PASSPHRASE: &str = "passphrase";
+
+/// The user systemd-homed's first boot wizard creates from a credential.
+const HOME_USER: &str = "alice";
+
+/// The password of `HOME_USER`.
+const HOME_PASSWORD: &str = "password";
+
+/// `HOME_PASSWORD` hashed with `openssl passwd -6 -salt bootc-imagectl password`.
+const HOME_HASHED_PASSWORD: &str = "$6$bootc-imagectl$bT.qMyfQznhEE5jMYfRNoTWpw9ilj.EVYUTCuvm6ykWREwP3sTwVpJXgbHpSfwhFZ5E2.s3xsMzYJnpC9pVPn0";
 
 /// How long the installed system has to boot and start sshd.
 const BOOT_TIMEOUT: Duration = Duration::from_secs(300);
@@ -136,6 +146,16 @@ fn install(sh: &Shell, image: &str, work: &Path, disk: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The `home.create.` credential of `HOME_USER`.
+fn home_credential() -> String {
+    let record = json!({
+        "storage": "directory",
+        "secret": { "password": [HOME_PASSWORD] },
+        "privileged": { "hashedPassword": [HOME_HASHED_PASSWORD] },
+    });
+    format!("home.create.{HOME_USER}:{record}")
+}
+
 /// A systemd-vmspawn VM booted from the installed disk.
 #[derive(Debug)]
 #[must_use = "stops the VM when dropped"]
@@ -176,6 +196,7 @@ impl Vm {
             .arg(format!(
                 "--set-credential=cryptsetup.passphrase:{PASSPHRASE}"
             ))
+            .arg(format!("--set-credential={}", home_credential()))
             .arg(format!(
                 "--bind-ro={}:{TARGET}",
                 target_dir(binary)?.display()
