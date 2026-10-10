@@ -55,13 +55,13 @@ fn lays_out_toplevel() -> Result<()> {
         ("srv", "var/srv"),
         ("mnt", "var/mnt"),
         ("media", "run/media"),
-        ("ostree", "sysroot/ostree"),
     ] {
         assert_eq!(ROOT.read_link(link)?, Path::new(target), "/{link}");
     }
     assert!(ROOT.is_dir("sysroot"));
     assert!(ROOT.is_dir("var"));
     assert!(ROOT.is_dir("boot/EFI/Linux"));
+    assert!(ROOT.is_file("usr/lib/composefs/setup-root-conf.toml"));
 
     let layout = ROOT.read_to_string("usr/lib/tmpfiles.d/bootc-imagectl-layout.conf")?;
     assert!(

@@ -59,6 +59,8 @@ image enables enabled. To keep a unit disabled that a preset enables, add
 it if it must never run. Manual calls to `systemctl disable` would be undone when
 `finalize` applies the presets.
 
+End the build with `bootc container lint` to check the image.
+
 ## Installing
 
 From a live system, e.g. a USB stick with one of the supported Linux distributions

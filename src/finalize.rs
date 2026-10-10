@@ -20,7 +20,6 @@ mod identity;
 mod initramfs;
 mod kargs;
 mod layout;
-mod lint;
 mod presets;
 mod systemd;
 mod tmpfiles;
@@ -49,7 +48,5 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;
     kargs::finalize(&root).context("writing the kernel arguments")?;
-    var::finalize(&root, distro).context("finalizing /var")?;
-
-    lint::bootc_lint()
+    var::finalize(&root, distro).context("finalizing /var")
 }
