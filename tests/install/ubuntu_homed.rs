@@ -10,6 +10,6 @@ fn updates_from_target_imgref() -> Result<()> {
 }
 
 #[test]
-fn creates_wizard_user() -> Result<()> {
-    homed::creates_wizard_user()
+fn adds_wizard_user_to_groups() -> Result<()> {
+    homed::adds_wizard_user_to(&["sudo", "adm", "cdrom", "dip", "plugdev", "users"])
 }
