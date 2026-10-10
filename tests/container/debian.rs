@@ -6,6 +6,7 @@ use anyhow::Result;
 
 use crate::accounts::{self, MovedAccounts};
 use crate::finalize::{ROOT, names, var_tmpfiles};
+use crate::homed;
 
 #[test]
 fn moves_dpkg_database_and_links_it_back() -> Result<()> {
@@ -45,6 +46,14 @@ fn removes_snakeoil_certificate() -> Result<()> {
 fn records_enabled_units_in_presets() {
     // Debian's presets enable every unit the image enables.
     assert!(!ROOT.exists("usr/lib/systemd/system-preset/10-bootc-imagectl.preset"));
+}
+
+#[test]
+fn adds_wizard_user_to_groups() -> Result<()> {
+    // The presets enable the wizard. It creates no user since the image has one.
+    homed::adds_wizard_user_to(&[
+        "sudo", "audio", "cdrom", "dip", "floppy", "video", "plugdev", "lpadmin",
+    ])
 }
 
 /// The image's package users and its regular user.

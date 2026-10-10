@@ -15,6 +15,7 @@ use crate::cli::FinalizeOpts;
 use crate::distro;
 
 mod accounts;
+mod homed;
 mod identity;
 mod initramfs;
 mod kargs;
@@ -23,6 +24,7 @@ mod lint;
 mod presets;
 mod systemd;
 mod tmpfiles;
+mod units;
 mod var;
 
 /// Run the `finalize` subcommand.
@@ -37,6 +39,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     info!("finalizing a {} rootfs", distro.name());
     systemd::check().context("checking the systemd version")?;
 
+    homed::finalize(&root, distro).context("configuring the systemd-homed first boot wizard")?;
     accounts::finalize(&root, distro, &opts.sysusers_lock).context("finalizing the accounts")?;
     initramfs::finalize(&root, distro).context("building the initramfs")?;
     identity::finalize(&root, distro).context("removing the machine identity")?;
