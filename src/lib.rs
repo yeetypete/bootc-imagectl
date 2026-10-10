@@ -5,7 +5,6 @@ pub mod finalize;
 pub(crate) mod fs;
 pub mod id;
 pub mod install;
-pub mod login_defs;
 pub mod passwd;
 pub mod sysusers;
 pub mod userdb;

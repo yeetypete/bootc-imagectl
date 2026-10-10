@@ -76,7 +76,6 @@ pub(crate) fn moves_users_out_of_etc(accounts: &MovedAccounts) -> Result<()> {
 pub(crate) fn writes_user_records(accounts: &MovedAccounts) -> Result<()> {
     for &(name, uid) in accounts.system_users {
         let record = ROOT.read_to_string(format!("usr/lib/userdb/{name}.user"))?;
-        assert!(record.contains("\"disposition\": \"system\""), "{record}");
         assert!(record.contains(&format!("\"uid\": {uid}")), "{record}");
         assert_eq!(
             ROOT.read_link(format!("usr/lib/userdb/{uid}.user"))?,

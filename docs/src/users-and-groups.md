@@ -196,9 +196,8 @@ It performs the following steps:
    file in the directories `systemd-sysusers` reads.
 2. Runs the [account checks](#checks).
 3. Writes a user record for every user other than `root` and `nobody` to
-   `/usr/lib/userdb/<name>.user`, with `disposition` `system` or `regular`
-   according to the UID range, and `uid`, `gid`, `realName`, `homeDirectory`
-   and `shell` from the passwd entry.
+   `/usr/lib/userdb/<name>.user`, with `uid`, `gid`, `realName`,
+   `homeDirectory` and `shell` from the passwd entry.
    Links `/usr/lib/userdb/<UID>.user` to it. If the shadow entry has a
    password hash, writes it to the privileged user record
    `/usr/lib/userdb/<name>.user-privileged` with mode `0600`. Otherwise sets

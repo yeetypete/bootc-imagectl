@@ -10,7 +10,8 @@
 //! alice:wheel.membership                     membership in a group
 //! ```
 //!
-//! The record holds the passwd(5) fields. The privileged file holds the
+//! The record holds the passwd(5) fields. systemd derives its disposition,
+//! system or regular, from the UID. The privileged file holds the
 //! password hash from shadow(5), which nss-systemd merges into the record
 //! when it may read the file. A user without a hash has no privileged file
 //! and is locked. A membership file exists for every group the user belongs
@@ -18,43 +19,19 @@
 
 use std::ops::Not;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use cap_std_ext::cap_std::fs::{Permissions, PermissionsExt};
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use serde::Serialize;
 
 use crate::id::{Gid, Uid};
-use crate::login_defs::LoginDefs;
 use crate::passwd::{Passwd, Shadow, non_empty};
 use crate::sysusers::Name;
 
 /// The drop-in directory under /usr, where the image ships its user
 /// records, relative to the rootfs.
 pub const DROPIN_DIR: &str = "usr/lib/userdb";
-
-/// The context a user is defined in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Disposition {
-    /// A system user, in the system range of login.defs(5).
-    System,
-    /// A regular user, in the regular range of login.defs(5).
-    Regular,
-}
-
-impl Disposition {
-    /// The disposition of a UID by the login.defs ranges.
-    fn of(uid: Uid, defs: &LoginDefs) -> Result<Self> {
-        if defs.is_system(uid) {
-            Ok(Self::System)
-        } else if defs.is_regular(uid) {
-            Ok(Self::Regular)
-        } else {
-            bail!("UID {uid} is in neither the system nor the regular range of login.defs")
-        }
-    }
-}
 
 /// The privileged section of a user record: the fields only root may read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -76,7 +53,6 @@ struct PrivilegedRecord<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct UserRecord {
     pub user_name: String,
-    pub disposition: Disposition,
     pub uid: Uid,
     pub gid: Gid,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,19 +71,15 @@ pub struct UserRecord {
 
 impl UserRecord {
     /// The record of a passwd entry and its shadow entry, if it has one.
-    ///
-    /// # Errors
-    ///
-    /// Fails if the UID is in no range of login.defs.
-    pub fn from_passwd(user: &Passwd, shadow: Option<&Shadow>, defs: &LoginDefs) -> Result<Self> {
+    #[must_use]
+    pub fn from_passwd(user: &Passwd, shadow: Option<&Shadow>) -> Self {
         let privileged = shadow
             .and_then(|shadow| shadow.password.hash())
             .map(|hash| Privileged {
                 hashed_password: vec![hash.to_owned()],
             });
-        Ok(Self {
+        Self {
             user_name: user.name.to_string(),
-            disposition: Disposition::of(user.uid, defs)?,
             uid: user.uid,
             gid: user.gid,
             real_name: non_empty(&user.gecos),
@@ -115,7 +87,7 @@ impl UserRecord {
             shell: non_empty(user.shell.as_str()),
             locked: privileged.is_none(),
             privileged,
-        })
+        }
     }
 
     /// Write the record and, if there is one, the privileged section to the
@@ -190,15 +162,13 @@ mod tests {
 
     #[test]
     fn takes_fields_from_passwd_and_shadow() -> Result<()> {
-        let defs = LoginDefs::default();
         let user: Passwd = "avahi:x:969:969:Avahi mDNS/DNS-SD daemon:/:/usr/bin/nologin".parse()?;
         let shadow: Shadow = "avahi:!*:20702:::::1:".parse()?;
-        let record = UserRecord::from_passwd(&user, Some(&shadow), &defs)?;
+        let record = UserRecord::from_passwd(&user, Some(&shadow));
         assert_eq!(
             record,
             UserRecord {
                 user_name: "avahi".into(),
-                disposition: Disposition::System,
                 uid: uid(969),
                 gid: gid(969),
                 real_name: Some("Avahi mDNS/DNS-SD daemon".into()),
@@ -211,8 +181,7 @@ mod tests {
 
         let user: Passwd = "alice:x:1000:1000:::".parse()?;
         let shadow: Shadow = "alice:$6$salt$hash:20702::::::".parse()?;
-        let record = UserRecord::from_passwd(&user, Some(&shadow), &defs)?;
-        assert_eq!(record.disposition, Disposition::Regular);
+        let record = UserRecord::from_passwd(&user, Some(&shadow));
         assert_eq!(
             (record.real_name, record.home_directory, record.shell),
             (None, None, None)
@@ -226,33 +195,21 @@ mod tests {
         );
 
         // A user without a shadow entry has no password.
-        assert!(UserRecord::from_passwd(&user, None, &defs)?.locked);
-
-        let user: Passwd = "x:x:65000:65000:::".parse()?;
-        let err = format!(
-            "{:#}",
-            UserRecord::from_passwd(&user, None, &defs).unwrap_err()
-        );
-        assert_eq!(
-            err,
-            "UID 65000 is in neither the system nor the regular range of login.defs"
-        );
+        assert!(UserRecord::from_passwd(&user, None).locked);
         Ok(())
     }
 
     #[test]
     fn writes_record_and_links_it_by_uid() -> Result<()> {
         let root = rootfs()?;
-        let defs = LoginDefs::default();
         let user: Passwd = "alice:x:1000:1000:Alice:/home/alice:/bin/sh".parse()?;
         let shadow: Shadow = "alice:$6$salt$hash:20702::::::".parse()?;
-        UserRecord::from_passwd(&user, Some(&shadow), &defs)?.write(&root)?;
+        UserRecord::from_passwd(&user, Some(&shadow)).write(&root)?;
         assert_eq!(
             root.read_to_string("alice.user")?,
             indoc! {r#"
                 {
                   "userName": "alice",
-                  "disposition": "regular",
                   "uid": 1000,
                   "gid": 1000,
                   "realName": "Alice",
@@ -287,7 +244,7 @@ mod tests {
         // A second write replaces the files, and removes the privileged ones
         // of a user who lost the password.
         let user: Passwd = "alice:x:1000:1000:Alice Smith:/home/alice:/bin/sh".parse()?;
-        UserRecord::from_passwd(&user, None, &defs)?.write(&root)?;
+        UserRecord::from_passwd(&user, None).write(&root)?;
         let record = root.read_to_string("1000.user")?;
         assert!(record.contains("Alice Smith"), "{record}");
         assert!(record.contains("\"locked\": true"), "{record}");

@@ -18,7 +18,6 @@ use uzers::{Groups, Users};
 
 use crate::distro::Distro;
 use crate::id::{Gid, Uid};
-use crate::login_defs::LoginDefs;
 use crate::passwd::{self, Entry as _, Passwd, Shadow, non_empty};
 use crate::sysusers::lockfile::{Block, LockFile, Package};
 use crate::sysusers::{self, Entry, IdSource, Index, Membership, Name, PrimaryGroup, User};
@@ -589,7 +588,6 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -> Resu
     let shadows = Shadow::read_all(root)?;
     let files = sysusers::read_all(root)?;
     let lock = LockFile::read(root, lock_path)?;
-    let defs = LoginDefs::read(root)?;
     let nss = UsersCache::new();
     let accounts = Accounts {
         root,
@@ -603,7 +601,7 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -> Resu
         index: files.iter().collect(),
     };
     run(&Check::BEFORE_MOVE, &accounts).context("checking the accounts")?;
-    write_user_records(&accounts, &defs).context("writing the user records")?;
+    write_user_records(&accounts).context("writing the user records")?;
     write_memberships(&accounts).context("writing the membership files")?;
     move_users(&accounts).context("moving the users out of /etc")?;
     run(&Check::AFTER_MOVE, &accounts).context("checking that the moved users resolve")
@@ -614,7 +612,7 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro, lock: &Utf8Path) -> Resu
 /// A user with a password hash in /etc/shadow gets a privileged record with
 /// the hash, every other user is locked, as is every user of a removed
 /// package.
-fn write_user_records(accounts: &Accounts<'_>, defs: &LoginDefs) -> Result<()> {
+fn write_user_records(accounts: &Accounts<'_>) -> Result<()> {
     let root = accounts.root;
     root.create_dir_all(userdb::DROPIN_DIR)
         .with_context(|| format!("creating /{}", userdb::DROPIN_DIR))?;
@@ -629,9 +627,7 @@ fn write_user_records(accounts: &Accounts<'_>, defs: &LoginDefs) -> Result<()> {
         let shadow = accounts
             .shadow_of(&user.name)
             .filter(|_| !removed.contains(&user.name));
-        let record = UserRecord::from_passwd(user, shadow, defs)
-            .with_context(|| format!("the user {}", user.name))?;
-        record
+        UserRecord::from_passwd(user, shadow)
             .write(&dir)
             .with_context(|| format!("writing the record of {}", user.name))?;
         debug!("wrote the user record of {}", user.name);
@@ -1088,7 +1084,7 @@ mod tests {
         let lock = LOCK.replace("# package: apache", "# removed: apache");
         let fixture = Fixture::new(TestDistro::default(), Some(&lock), "")?;
         let root = &fixture.root;
-        write_user_records(&fixture.accounts(), &LoginDefs::default())?;
+        write_user_records(&fixture.accounts())?;
         let http = root.read_to_string("usr/lib/userdb/http.user")?;
         assert!(http.contains("\"locked\": true"), "{http}");
         assert!(!root.exists("usr/lib/userdb/http.user-privileged"));
@@ -1099,7 +1095,7 @@ mod tests {
     fn writes_records_for_every_user_but_root_and_nobody() -> Result<()> {
         let fixture = Fixture::new(TestDistro::default(), Some(LOCK), "")?;
         let root = &fixture.root;
-        write_user_records(&fixture.accounts(), &LoginDefs::default())?;
+        write_user_records(&fixture.accounts())?;
         let names = root.open_dir(userdb::DROPIN_DIR)?.filenames_sorted()?;
         assert_eq!(
             names,
@@ -1132,10 +1128,6 @@ mod tests {
                 "tss:adm.membership",
                 "tss:tss.membership",
             ]
-        );
-        assert!(
-            root.read_to_string("usr/lib/userdb/http.user")?
-                .contains("\"disposition\": \"system\"")
         );
         Ok(())
     }
