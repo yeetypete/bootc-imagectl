@@ -58,6 +58,11 @@ fn writes_user_records_to_userdb() -> Result<()> {
 }
 
 #[test]
+fn writes_group_records_to_userdb() -> Result<()> {
+    accounts::writes_group_records(&FEDORA)
+}
+
+#[test]
 fn writes_privileged_records_for_users_with_passwords() -> Result<()> {
     accounts::writes_privileged_records(&FEDORA)
 }

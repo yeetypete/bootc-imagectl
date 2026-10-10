@@ -86,6 +86,19 @@ pub(crate) fn writes_user_records(accounts: &MovedAccounts) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn writes_group_records(accounts: &MovedAccounts) -> Result<()> {
+    let group = uzers::get_group_by_name(accounts.group).expect("the group resolves through NSS");
+    let gid = group.gid();
+    let record = ROOT.read_to_string(format!("usr/lib/userdb/{}.group", accounts.group))?;
+    assert!(record.contains(&format!("\"gid\": {gid}")), "{record}");
+    assert_eq!(
+        ROOT.read_link(format!("usr/lib/userdb/{gid}.group"))?,
+        std::path::Path::new(&format!("{}.group", accounts.group))
+    );
+    assert!(!ROOT.exists("usr/lib/userdb/root.group"));
+    Ok(())
+}
+
 /// The regular user's password hash is in a privileged record only root may
 /// read. Users without a password are locked instead.
 pub(crate) fn writes_privileged_records(accounts: &MovedAccounts) -> Result<()> {
