@@ -25,6 +25,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result, bail, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::fs_utf8::Dir;
+use serde::Serialize;
 
 use word::WHITESPACE;
 
@@ -43,7 +44,8 @@ const MAX_NAME_LEN: usize = 31;
 
 /// A user or group name systemd accepts: a letter or `_` followed by
 /// letters, digits, `_` and `-`, at most 31 characters.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
 pub struct Name(String);
 
 impl Name {

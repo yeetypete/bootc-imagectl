@@ -72,13 +72,18 @@ fn keeps_removed_accounts_locked() -> Result<()> {
 }
 
 #[test]
-fn moves_users_out_of_etc_and_resolves_them_through_nss() -> Result<()> {
-    accounts::moves_users_out_of_etc(&UBUNTU)
+fn moves_accounts_out_of_etc_and_resolves_them_through_nss() -> Result<()> {
+    accounts::moves_accounts_out_of_etc(&UBUNTU)
 }
 
 #[test]
 fn writes_user_records_to_userdb() -> Result<()> {
     accounts::writes_user_records(&UBUNTU)
+}
+
+#[test]
+fn writes_group_records_to_userdb() -> Result<()> {
+    accounts::writes_group_records(&UBUNTU)
 }
 
 #[test]

@@ -26,7 +26,7 @@ fn accepts_password_of_moved_user() -> Result<()> {
 
 #[test]
 fn keeps_account_files_unchanged_after_first_boot() -> Result<()> {
-    accounts::account_files_unchanged(&FEDORA)
+    accounts::account_files_unchanged()
 }
 
 #[test]

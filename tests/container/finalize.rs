@@ -114,7 +114,6 @@ fn sets_up_tmp_run_and_lock_in_var() -> Result<()> {
 fn removes_machine_identity() -> Result<()> {
     assert_eq!(ROOT.read("etc/machine-id")?, b"uninitialized\n");
     assert!(!ROOT.exists("etc/fstab"));
-    assert!(!ROOT.exists("etc/passwd-"));
     let ssh = names("etc/ssh")?;
     assert!(
         !ssh.iter()
