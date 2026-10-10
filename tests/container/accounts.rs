@@ -52,13 +52,15 @@ pub(crate) fn moves_accounts_out_of_etc(accounts: &MovedAccounts) -> Result<()> 
         .collect();
     assert_eq!(shadow, ["root", "nobody"]);
 
-    let gids: Vec<Gid> = Group::read_all(&root)?
-        .iter()
-        .map(|group| group.gid)
-        .collect();
+    let groups = Group::read_all(&root)?;
+    let gids: Vec<Gid> = groups.iter().map(|group| group.gid).collect();
     assert_eq!(gids, [Gid::ROOT, Gid::NOBODY]);
-    let gshadow = Gshadow::read_all(&root)?;
-    assert_eq!(gshadow.len(), 2, "{gshadow:?}");
+    let gshadow: Vec<String> = Gshadow::read_all(&root)?
+        .iter()
+        .map(|entry| entry.name.to_string())
+        .collect();
+    let names: Vec<String> = groups.iter().map(|group| group.name.to_string()).collect();
+    assert_eq!(gshadow, names);
 
     let (name, uid) = accounts.user;
     let user = uzers::get_user_by_name(name).expect("the user resolves through NSS");
@@ -128,7 +130,7 @@ pub(crate) fn writes_privileged_records(accounts: &MovedAccounts) -> Result<()> 
 }
 
 /// The regular user has a membership file for its primary group and for
-/// [`MovedAccounts::group`]. root has none.
+/// [`MovedAccounts::group`], and root for its own group.
 pub(crate) fn writes_membership_files(accounts: &MovedAccounts) -> Result<()> {
     let (name, _) = accounts.user;
     assert_eq!(
@@ -139,7 +141,7 @@ pub(crate) fn writes_membership_files(accounts: &MovedAccounts) -> Result<()> {
         "usr/lib/userdb/{name}:{}.membership",
         accounts.group
     )));
-    assert!(!ROOT.exists("usr/lib/userdb/root:root.membership"));
+    assert!(ROOT.exists("usr/lib/userdb/root:root.membership"));
     Ok(())
 }
 

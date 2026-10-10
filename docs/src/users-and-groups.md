@@ -209,8 +209,7 @@ It performs the following steps:
    `/usr/lib/userdb/<name>.group`, with `gid` from the group entry, and links
    `/usr/lib/userdb/<GID>.group` to it.
 5. Writes an empty `/usr/lib/userdb/<user>:<group>.membership` file for
-   every user and each group it belongs to, except `root` and `nobody` in
-   their own groups.
+   every user and each group it belongs to.
 6. Removes the users and groups with records from `/etc/passwd`,
    `/etc/shadow`, `/etc/group` and `/etc/gshadow`, and checks that they and
    their memberships still resolve through NSS.

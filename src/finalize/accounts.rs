@@ -103,8 +103,7 @@ impl Accounts<'_> {
     }
 
     /// The groups each user belongs to, through its primary group or a
-    /// member list in /etc/group. root and nobody in root's and nobody's
-    /// groups are left out.
+    /// member list in /etc/group.
     fn memberships(&self) -> Result<BTreeMap<&Name, BTreeSet<&Name>>> {
         let mut memberships: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
         for user in self.users {
@@ -123,9 +122,6 @@ impl Accounts<'_> {
                 .iter()
                 .filter(|group| group.members.contains(&user.name));
             for group in iter::once(primary).chain(auxiliary) {
-                if user.uid.is_intrinsic() && group.gid.is_intrinsic() {
-                    continue;
-                }
                 memberships
                     .entry(&user.name)
                     .or_default()
@@ -561,14 +557,10 @@ fn unapplied_entries(accounts: &Accounts<'_>) -> Result<Vec<String>> {
         }
     }
     for &(user, group) in &index.memberships {
-        let listed = accounts
-            .groups
-            .iter()
-            .any(|entry| entry.name == *group && entry.members.contains(user));
         let written = memberships
             .get(user)
             .is_some_and(|groups| groups.contains(group));
-        if !listed && !written {
+        if !written {
             findings.push(format!("{user} is not a member of the group {group}"));
         }
     }
@@ -1092,8 +1084,8 @@ mod tests {
             Vec::<String>::new()
         );
 
-        // NSS without tss, with http at another UID and GID, and avahi and
-        // root missing from adm.
+        // NSS without tss and nobody, with http at another UID and GID, and
+        // avahi and root missing from adm.
         let users: Vec<Passwd> = [
             "root:x:0:0::/root:",
             "http:x:35:34::/srv/http:/usr/bin/nologin",
@@ -1117,6 +1109,7 @@ mod tests {
                 "GID 34 does not resolve",
                 "GID 971 does not resolve",
                 "root does not resolve as a member of adm",
+                "nobody does not resolve as a member of nobody",
                 "avahi does not resolve as a member of adm",
                 "http does not resolve as a member of http",
                 "tss does not resolve as a member of tss",
@@ -1222,7 +1215,9 @@ mod tests {
                 "avahi:adm.membership",
                 "avahi:avahi.membership",
                 "http:http.membership",
+                "nobody:nobody.membership",
                 "root:adm.membership",
+                "root:root.membership",
                 "tss:adm.membership",
                 "tss:tss.membership",
             ]
