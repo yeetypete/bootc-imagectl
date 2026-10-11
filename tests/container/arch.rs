@@ -33,6 +33,7 @@ fn records_enabled_units_in_presets() -> Result<()> {
         "{presets}"
     );
     assert!(!presets.contains("disable"), "{presets}");
+    assert!(!ROOT.exists("usr/lib/systemd/system-preset/99-bootc-imagectl-default.preset"));
     Ok(())
 }
 

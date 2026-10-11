@@ -9,7 +9,7 @@ use cap_std_ext::cap_std::fs_utf8::Dir;
 
 use super::{Distro, PackageName};
 
-/// rpm's database, which Fedora already keeps under /usr and links to from
+/// rpm's database, which Fedora already keeps under /usr and symlinks from
 /// /var/lib/rpm.
 const DATABASE: &str = "usr/lib/sysimage/rpm";
 

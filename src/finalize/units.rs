@@ -2,16 +2,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::Command;
+use std::str::FromStr;
 
 use anyhow::{Context, Result};
+use camino::Utf8PathBuf;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use serde::Deserialize;
 
 use crate::command::CommandRunExt;
-
-/// Where `systemctl enable` links system units, relative to the rootfs.
-const UNIT_DIR: &str = "etc/systemd/system";
 
 /// Where packages install system units, relative to the rootfs.
 const VENDOR_UNIT_DIR: &str = "usr/lib/systemd/system";
@@ -38,24 +37,12 @@ pub(super) enum EnablementState {
     Unknown,
 }
 
-/// What the preset policy does with a unit file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub(super) enum Preset {
-    Enabled,
-    Disabled,
-    Ignored,
-}
-
 /// A unit file, as reported by `systemctl list-unit-files --output=json`.
 #[derive(Debug, Deserialize)]
 pub(super) struct UnitFile {
     #[serde(rename = "unit_file")]
     pub(super) name: String,
     pub(super) state: EnablementState,
-    /// `None` for unit files the preset policy does not apply to, e.g.
-    /// static ones.
-    pub(super) preset: Option<Preset>,
 }
 
 /// The unit files of the rootfs at `/`.
@@ -70,23 +57,21 @@ pub(super) fn unit_files() -> Result<Vec<UnitFile>> {
     serde_json::from_str(&output).context("parsing systemctl list-unit-files")
 }
 
-/// The unit file `name` of the rootfs at `/` and its drop-ins, in the order
-/// systemd applies them. Each file follows a `# <path>` line, without its
-/// comments.
+/// The configuration `name` of the rootfs at `/`, e.g. `systemd/system-preset`,
+/// with its drop-ins in the order systemd reads them. Each file follows a
+/// `# <path>` line, without its comments.
 ///
 /// # Errors
 ///
 /// Fails if systemd-analyze fails.
 pub(super) fn cat_config(name: &str) -> Result<String> {
     Command::new("systemd-analyze")
-        .args(["--root=/", "--tldr", "cat-config"])
-        .arg(format!("systemd/system/{name}"))
+        .args(["--root=/", "--tldr", "cat-config", name])
         .output_string()
 }
 
-/// Whether the unit `name` is enabled, including by a link in a vendor
-/// `.wants/` directory or by the preset policy, which systemd applies on the
-/// first boot.
+/// Whether the unit `name` is enabled, including by a symlink in a vendor
+/// `.wants/` directory, which systemctl reports as disabled.
 ///
 /// # Errors
 ///
@@ -98,10 +83,7 @@ pub(super) fn is_enabled(root: &Dir, unit_files: &[UnitFile], name: &str) -> Res
     Ok(match unit.state {
         EnablementState::Masked | EnablementState::MaskedRuntime => false,
         EnablementState::Enabled => true,
-        _ => {
-            unit.preset == Some(Preset::Enabled)
-                || linked_units(root, VENDOR_UNIT_DIR)?.contains(name)
-        }
+        _ => dependencies(root, VENDOR_UNIT_DIR)?.contains(name),
     })
 }
 
@@ -133,42 +115,102 @@ impl<'a> From<&'a str> for UnitName<'a> {
     }
 }
 
-/// The names of the units linked from the `.wants/`, `.requires/` and
-/// `.upholds/` directories in `dir`, where `systemctl enable` creates them.
-fn linked_units(root: &Dir, dir: &str) -> Result<BTreeSet<String>> {
-    let mut linked = BTreeSet::new();
+impl<'a> UnitName<'a> {
+    /// The instance, if this names an instance of `template`.
+    fn instance_of(&self, template: &str) -> Option<&'a str> {
+        match self {
+            Self::Instance {
+                template: of,
+                instance,
+            } if of == template => Some(instance),
+            _ => None,
+        }
+    }
+}
+
+/// A unit's `systemctl is-enabled --full` output: its enablement state,
+/// followed by its installation targets, the indented symlinks that enable it.
+#[derive(Debug)]
+struct IsEnabled {
+    symlinks: Vec<Utf8PathBuf>,
+}
+
+impl FromStr for IsEnabled {
+    type Err = anyhow::Error;
+
+    fn from_str(output: &str) -> Result<Self> {
+        let mut lines = output.lines();
+        lines.next().context("no state")?;
+        let symlinks = lines
+            .map(|line| {
+                line.strip_prefix("  ")
+                    .map(Utf8PathBuf::from)
+                    .with_context(|| format!("{line:?} is not an indented symlink"))
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self { symlinks })
+    }
+}
+
+/// The names of the units symlinked from the `.wants/`, `.requires/` and
+/// `.upholds/` directories in `dir`, which systemd adds as dependencies.
+fn dependencies(root: &Dir, dir: &str) -> Result<BTreeSet<String>> {
+    let mut dependencies = BTreeSet::new();
     let Some(units) = root.open_dir_optional(dir)? else {
-        return Ok(linked);
+        return Ok(dependencies);
     };
     for entry in units.entries()? {
         let entry = entry?;
-        let dir = entry.file_name()?;
+        let name = entry.file_name()?;
         let is_dependency_dir = [".wants", ".requires", ".upholds"]
             .iter()
-            .any(|suffix| dir.ends_with(suffix));
+            .any(|suffix| name.ends_with(suffix));
         if !is_dependency_dir || !entry.file_type()?.is_dir() {
             continue;
         }
-        for link in units.read_dir(&dir)? {
-            linked.insert(link?.file_name()?);
+        for symlink in units.read_dir(&name)? {
+            dependencies.insert(symlink?.file_name()?);
         }
     }
-    Ok(linked)
+    Ok(dependencies)
 }
 
-/// The enabled instance names of each template unit.
+/// The enabled instance names of each template unit in `unit_files`.
 ///
 /// # Errors
 ///
-/// Fails if the unit directory cannot be read.
-pub(super) fn enabled_instances(root: &Dir) -> Result<BTreeMap<String, BTreeSet<String>>> {
-    let mut instances = BTreeMap::<String, BTreeSet<String>>::new();
-    for name in linked_units(root, UNIT_DIR)? {
-        if let UnitName::Instance { template, instance } = UnitName::from(name.as_str()) {
-            instances
-                .entry(template)
-                .or_default()
-                .insert(instance.to_owned());
+/// Fails if systemctl fails.
+pub(super) fn enabled_instances(
+    unit_files: &[UnitFile],
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    // A template is indirect if it has enabled instances but no default
+    // instance.
+    let templates = unit_files.iter().filter(|unit| {
+        UnitName::from(unit.name.as_str()) == UnitName::Template
+            && matches!(
+                unit.state,
+                EnablementState::Enabled | EnablementState::Indirect
+            )
+    });
+    let mut instances = BTreeMap::new();
+    for unit in templates {
+        let output: IsEnabled = Command::new("systemctl")
+            .args(["is-enabled", "--root=/", "--full", &unit.name])
+            .output_string()?
+            .parse()
+            .with_context(|| format!("parsing systemctl is-enabled {}", unit.name))?;
+        // The symlinks include aliases, e.g. autovt@.service of
+        // getty@.service.
+        let enabled: BTreeSet<String> = output
+            .symlinks
+            .iter()
+            .filter_map(|symlink| UnitName::from(symlink.file_name()?).instance_of(&unit.name))
+            .map(str::to_owned)
+            .collect();
+        // Skip a template without enabled instances, as a preset enabling it
+        // could enable units the image leaves disabled.
+        if !enabled.is_empty() {
+            instances.insert(unit.name.clone(), enabled);
         }
     }
     Ok(instances)
@@ -176,7 +218,6 @@ pub(super) fn enabled_instances(root: &Dir) -> Result<BTreeMap<String, BTreeSet<
 
 #[cfg(test)]
 mod tests {
-    use cap_std_ext::cap_tempfile::utf8::TempDir;
     use indoc::indoc;
 
     use super::*;
@@ -199,41 +240,38 @@ mod tests {
         );
     }
 
-    /// A rootfs that enables `sshd.service` and `serial-getty@ttyS0.service`
-    /// and masks `getty@tty9.service`.
-    fn image() -> Result<TempDir> {
-        let root = rootfs()?;
-        root.create_dir_all("etc/systemd/system/getty.target.wants")?;
-        root.create_dir_all("etc/systemd/system/multi-user.target.wants")?;
-        root.symlink(
-            "../serial-getty@.service",
-            "etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service",
-        )?;
-        root.symlink(
-            "../sshd.service",
-            "etc/systemd/system/multi-user.target.wants/sshd.service",
-        )?;
-        root.symlink("null", "etc/systemd/system/getty@tty9.service")?;
-        Ok(root)
-    }
-
     #[test]
-    fn finds_enabled_instances() -> Result<()> {
-        let root = image()?;
+    fn finds_instances_of_template() {
+        let instance = UnitName::from("getty@tty1.service");
+        assert_eq!(instance.instance_of("getty@.service"), Some("tty1"));
+        assert_eq!(instance.instance_of("serial-getty@.service"), None);
         assert_eq!(
-            enabled_instances(&root)?,
-            BTreeMap::from([(
-                "serial-getty@.service".to_owned(),
-                BTreeSet::from(["ttyS0".to_owned()])
-            )])
+            UnitName::from("autovt@.service").instance_of("getty@.service"),
+            None
         );
-        Ok(())
     }
 
     #[test]
-    fn finds_nothing_without_unit_dir() -> Result<()> {
-        let root = rootfs()?;
-        assert!(enabled_instances(&root)?.is_empty());
+    fn parses_is_enabled() -> Result<()> {
+        let output = indoc! {"
+            enabled
+              /etc/systemd/system/getty.target.wants/getty@tty1.service
+              /etc/systemd/system/autovt@.service
+        "};
+        assert_eq!(
+            output.parse::<IsEnabled>()?.symlinks,
+            [
+                "/etc/systemd/system/getty.target.wants/getty@tty1.service",
+                "/etc/systemd/system/autovt@.service",
+            ]
+        );
+        assert!("disabled\n".parse::<IsEnabled>()?.symlinks.is_empty());
+        assert!("".parse::<IsEnabled>().is_err());
+        assert!(
+            "enabled\n/etc/systemd/system/x.service\n"
+                .parse::<IsEnabled>()
+                .is_err()
+        );
         Ok(())
     }
 
@@ -249,15 +287,13 @@ mod tests {
             [
               {"unit_file": "sshd.service", "state": "enabled", "preset": "disabled"},
               {"unit_file": "vendor.service", "state": "disabled", "preset": "disabled"},
-              {"unit_file": "preset.service", "state": "disabled", "preset": "enabled"},
-              {"unit_file": "disabled.service", "state": "disabled", "preset": "disabled"},
+              {"unit_file": "disabled.service", "state": "disabled", "preset": "enabled"},
               {"unit_file": "masked.service", "state": "masked", "preset": "enabled"}
             ]
         "#})?;
         for (name, enabled) in [
             ("sshd.service", true),
             ("vendor.service", true),
-            ("preset.service", true),
             ("disabled.service", false),
             ("masked.service", false),
             ("missing.service", false),

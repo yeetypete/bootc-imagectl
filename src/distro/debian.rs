@@ -82,14 +82,14 @@ fn link_target(path: &str, target: &str) -> String {
 }
 
 /// Symlink the state directories to their homes under /usr, replacing any
-/// link already there.
+/// symlink already there.
 fn link_state(root: &Dir) -> Result<()> {
     for (path, target) in STATE {
         let (dir, _) = path.rsplit_once('/').context("a state path has a parent")?;
         root.create_dir_all(dir)?;
         root.remove_file_optional(path)?;
         root.symlink(link_target(path, target), path)
-            .with_context(|| format!("linking /{path}"))?;
+            .with_context(|| format!("creating symlink /{path}"))?;
     }
     Ok(())
 }
