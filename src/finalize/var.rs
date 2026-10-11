@@ -28,7 +28,7 @@ const VAR_DIRS: &[(&str, u32)] = &[("var/tmp", 0o1777)];
 
 /// Symlinks systemd recreates at boot, kept for package installs after
 /// finalize.
-const VAR_LINKS: &[(&str, &str)] = &[("var/run", "../run"), ("var/lock", "../run/lock")];
+const VAR_SYMLINKS: &[(&str, &str)] = &[("var/run", "../run"), ("var/lock", "../run/lock")];
 
 /// Leaves unmounting /var to systemd-shutdown. journald keeps /var busy until
 /// systemd-shutdown kills it, so an earlier unmount fails.
@@ -161,7 +161,7 @@ fn write_var_tmpfiles(
 
 /// The symlinks in /var that point into /usr, relative to the rootfs, and
 /// their targets.
-fn links_into_usr(root: &Dir) -> Result<Vec<(Utf8PathBuf, Utf8PathBuf)>> {
+fn symlinks_into_usr(root: &Dir) -> Result<Vec<(Utf8PathBuf, Utf8PathBuf)>> {
     let mut links = Vec::new();
     let Some(var) = root.open_dir_optional("var")? else {
         return Ok(links);
@@ -182,7 +182,7 @@ fn links_into_usr(root: &Dir) -> Result<Vec<(Utf8PathBuf, Utf8PathBuf)>> {
             }
             Ok(ControlFlow::Continue(()))
         })
-        .context("scanning /var for links into /usr")?;
+        .context("scanning /var for symlinks into /usr")?;
     Ok(links)
 }
 
@@ -226,7 +226,7 @@ fn write_var_mount_dropin(root: &Dir) -> Result<()> {
 /// Symlinks from /var into /usr are kept.
 fn empty_var(root: &Dir) -> Result<()> {
     debug!("emptying /var, /run and /tmp");
-    let links = links_into_usr(root)?;
+    let links = symlinks_into_usr(root)?;
     for dir in ["run", "tmp"] {
         if let Some(entries) = root.open_dir_optional(dir)? {
             remove_unmounted(&entries, Utf8Path::new(dir))?;
@@ -246,16 +246,16 @@ fn empty_var(root: &Dir) -> Result<()> {
         root.set_permissions(dir, Permissions::from_mode(mode))
             .with_context(|| format!("setting the mode of /{dir}"))?;
     }
-    for (link, target) in VAR_LINKS {
+    for (link, target) in VAR_SYMLINKS {
         root.symlink(target, link)
-            .with_context(|| format!("linking /{link} -> {target}"))?;
+            .with_context(|| format!("creating symlink /{link} -> {target}"))?;
     }
     for (link, target) in &links {
         if let Some(parent) = link.parent() {
             root.create_dir_all(parent)?;
         }
         root.symlink(target, link)
-            .with_context(|| format!("linking /{link} -> {target}"))?;
+            .with_context(|| format!("creating symlink /{link} -> {target}"))?;
     }
     Ok(())
 }
@@ -420,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_links_into_usr() -> Result<()> {
+    fn keeps_symlinks_into_usr() -> Result<()> {
         let root = rootfs()?;
         root.create_dir_all("usr/lib/sysimage/dpkg")?;
         root.create_dir_all("var/lib")?;

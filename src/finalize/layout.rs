@@ -88,7 +88,7 @@ fn layout_toplevel(root: &Dir) -> Result<()> {
                 root.remove_all_optional(link)
                     .with_context(|| format!("removing {path}"))?;
                 root.symlink(target, link)
-                    .with_context(|| format!("linking {path} -> {target}"))?;
+                    .with_context(|| format!("creating symlink {path} -> {target}"))?;
             }
             Entry::Directory { .. } => writeln!(entries, "{entry}")?,
         }
