@@ -41,6 +41,19 @@ enum Action {
     Ignore,
 }
 
+impl FromStr for Action {
+    type Err = anyhow::Error;
+
+    fn from_str(word: &str) -> Result<Self> {
+        Ok(match word {
+            "enable" => Self::Enable,
+            "disable" => Self::Disable,
+            "ignore" => Self::Ignore,
+            _ => bail!("{word:?} is not a preset action"),
+        })
+    }
+}
+
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -92,12 +105,10 @@ impl FromStr for Directive {
 
     fn from_str(line: &str) -> Result<Self> {
         let mut words = line.split_whitespace();
-        let action = match words.next() {
-            Some("enable") => Action::Enable,
-            Some("disable") => Action::Disable,
-            Some("ignore") => Action::Ignore,
-            _ => bail!("{line:?} is not a preset directive"),
-        };
+        let action = words
+            .next()
+            .and_then(|word| word.parse().ok())
+            .with_context(|| format!("{line:?} is not a preset directive"))?;
         let pattern = words
             .next()
             .with_context(|| format!("{line:?} has no unit name"))?;
@@ -113,26 +124,21 @@ fn enable_directives(
     units: &[UnitFile],
     instances: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<Directive> {
-    let mut directives = Vec::new();
-    for unit in units {
-        match UnitName::from(unit.name.as_str()) {
+    units
+        .iter()
+        .filter_map(|unit| match UnitName::from(unit.name.as_str()) {
             // For a template unit, the directive enables only the instances
             // it lists.
-            UnitName::Template => {
-                if let Some(instances) = instances.get(&unit.name) {
-                    directives.push(Directive {
-                        instances: instances.iter().cloned().collect(),
-                        ..Directive::new(Action::Enable, &unit.name)
-                    });
-                }
-            }
+            UnitName::Template => instances.get(&unit.name).map(|instances| Directive {
+                instances: instances.iter().cloned().collect(),
+                ..Directive::new(Action::Enable, &unit.name)
+            }),
             UnitName::Plain if unit.state == EnablementState::Enabled => {
-                directives.push(Directive::new(Action::Enable, &unit.name));
+                Some(Directive::new(Action::Enable, &unit.name))
             }
-            _ => {}
-        }
-    }
-    directives
+            _ => None,
+        })
+        .collect()
 }
 
 /// Whether the preset files in `config` have a catchall, e.g. `disable *`.
@@ -162,7 +168,8 @@ pub(super) fn finalize(root: &Dir) -> Result<()> {
         root.remove_file_optional(file)
             .with_context(|| format!("removing /{file}"))?;
     }
-    root.create_dir_all(PRESET_DIR)?;
+    root.create_dir_all(PRESET_DIR)
+        .with_context(|| format!("creating /{PRESET_DIR}"))?;
 
     let units = units::unit_files()?;
     let directives = enable_directives(&units, &units::enabled_instances(&units)?);

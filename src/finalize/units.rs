@@ -130,7 +130,7 @@ impl<'a> UnitName<'a> {
 
 /// A unit's `systemctl is-enabled --full` output: its enablement state,
 /// followed by its installation targets, the indented symlinks that enable it.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct IsEnabled {
     symlinks: Vec<Utf8PathBuf>,
 }
@@ -161,14 +161,14 @@ fn dependencies(root: &Dir, dir: &str) -> Result<BTreeSet<String>> {
     };
     for entry in units.entries()? {
         let entry = entry?;
-        let dir = entry.file_name()?;
+        let name = entry.file_name()?;
         let is_dependency_dir = [".wants", ".requires", ".upholds"]
             .iter()
-            .any(|suffix| dir.ends_with(suffix));
+            .any(|suffix| name.ends_with(suffix));
         if !is_dependency_dir || !entry.file_type()?.is_dir() {
             continue;
         }
-        for symlink in units.read_dir(&dir)? {
+        for symlink in units.read_dir(&name)? {
             dependencies.insert(symlink?.file_name()?);
         }
     }
@@ -183,16 +183,17 @@ fn dependencies(root: &Dir, dir: &str) -> Result<BTreeSet<String>> {
 pub(super) fn enabled_instances(
     unit_files: &[UnitFile],
 ) -> Result<BTreeMap<String, BTreeSet<String>>> {
-    let mut instances = BTreeMap::new();
     // A template is indirect if it has enabled instances but no default
     // instance.
-    for unit in unit_files.iter().filter(|unit| {
+    let templates = unit_files.iter().filter(|unit| {
         UnitName::from(unit.name.as_str()) == UnitName::Template
             && matches!(
                 unit.state,
                 EnablementState::Enabled | EnablementState::Indirect
             )
-    }) {
+    });
+    let mut instances = BTreeMap::new();
+    for unit in templates {
         let output: IsEnabled = Command::new("systemctl")
             .args(["is-enabled", "--root=/", "--full", &unit.name])
             .output_string()?
@@ -200,13 +201,17 @@ pub(super) fn enabled_instances(
             .with_context(|| format!("parsing systemctl is-enabled {}", unit.name))?;
         // The symlinks include aliases, e.g. autovt@.service of
         // getty@.service.
-        let enabled = output
+        let enabled: BTreeSet<String> = output
             .symlinks
             .iter()
             .filter_map(|symlink| UnitName::from(symlink.file_name()?).instance_of(&unit.name))
             .map(str::to_owned)
             .collect();
-        instances.insert(unit.name.clone(), enabled);
+        // Skip a template without enabled instances, as a preset enabling it
+        // could enable units the image leaves disabled.
+        if !enabled.is_empty() {
+            instances.insert(unit.name.clone(), enabled);
+        }
     }
     Ok(instances)
 }
