@@ -141,12 +141,28 @@ fn enable_directives(
         .collect()
 }
 
-/// Whether the preset files in `config` have a catchall, e.g. `disable *`.
-fn has_catchall(config: &str) -> bool {
-    config
-        .lines()
-        .filter_map(|line| line.parse::<Directive>().ok())
-        .any(|directive| directive.is_catchall())
+/// The directives of all preset files, as `systemd-analyze cat-config`
+/// prints them.
+struct Policy(Vec<Directive>);
+
+impl Policy {
+    /// Whether a directive matches every unit, e.g. `disable *`.
+    fn has_catchall(&self) -> bool {
+        self.0.iter().any(Directive::is_catchall)
+    }
+}
+
+impl FromStr for Policy {
+    type Err = anyhow::Error;
+
+    fn from_str(config: &str) -> Result<Self> {
+        config
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+            .map(str::parse)
+            .collect::<Result<_>>()
+            .map(Self)
+    }
 }
 
 /// Write `directives` to the preset file `path`.
@@ -178,7 +194,10 @@ pub(super) fn finalize(root: &Dir) -> Result<()> {
         info!("recorded {} units in /{PRESET_FILE}", directives.len());
     }
 
-    if !has_catchall(&units::cat_config("systemd/system-preset")?) {
+    let policy: Policy = units::cat_config("systemd/system-preset")?
+        .parse()
+        .context("parsing the preset policy")?;
+    if !policy.has_catchall() {
         write(
             root,
             DEFAULT_PRESET_FILE,
@@ -262,15 +281,18 @@ mod tests {
     }
 
     #[test]
-    fn finds_catchall() {
+    fn finds_catchall() -> Result<()> {
         let config = indoc! {"
             # /usr/lib/systemd/system-preset/90-systemd.preset
             enable getty@.service
             disable *.socket
         "};
-        assert!(!has_catchall(config));
-        assert!(has_catchall(&format!("{config}disable  *\n")));
-        assert!(has_catchall(&format!("{config}enable *\n")));
-        assert!(has_catchall(&format!("{config}ignore *\n")));
+        assert!(!config.parse::<Policy>()?.has_catchall());
+        for catchall in ["disable  *", "enable *", "ignore *"] {
+            let policy: Policy = format!("{config}{catchall}\n").parse()?;
+            assert!(policy.has_catchall(), "{catchall:?}");
+        }
+        assert!(format!("{config}bogus *\n").parse::<Policy>().is_err());
+        Ok(())
     }
 }
