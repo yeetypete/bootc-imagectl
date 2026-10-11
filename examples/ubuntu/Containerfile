@@ -84,6 +84,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     fonts-ubuntu \
     gnome-keyring \
     libpam-gnome-keyring \
+    locales-all \
     network-manager \
     policykit-desktop-privileges \
     ptyxis \
@@ -100,6 +101,9 @@ RUN ldconfig
 
 # systemd-homed's first boot wizard creates the first user.
 RUN userdel --remove ubuntu
+
+# Let systemd-firstboot prompt for the timezone.
+RUN rm /etc/localtime
 
 COPY --from=system-files /system_files/ /
 
