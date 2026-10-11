@@ -8,14 +8,17 @@ use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use rustix::process::{Pid, Signal, kill_process};
 use serde_json::json;
+use signal_hook::consts::{SIGINT, SIGTERM};
+use signal_hook::iterator::Signals;
 use xshell::{Shell, cmd};
 
 use crate::{bound_binary, target_dir};
@@ -71,27 +74,101 @@ const MACHINE: &str = "bootc-imagectl-test";
 /// it over ssh.
 pub(crate) fn run(sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> Result<()> {
     let work = target_dir(binary)?.join("install");
+    let disk = install_disk(sh, image, &work, Passphrase::Fixed)?;
+    let mut vm = Vm::boot(binary, &work, &disk)?;
+    vm.wait_for_ssh(sh)?;
+    vm.run_tests(sh, binary, args)?;
+    vm.power_off(sh)?;
+    vm.check_console()
+}
+
+/// How `bootc-imagectl install` gets the passphrase of the disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Passphrase {
+    /// `PASSPHRASE`, from a key file.
+    Fixed,
+    /// The installer asks for it on this terminal.
+    Prompt,
+}
+
+/// Install the image onto a fresh disk in `work` and return the disk.
+pub(crate) fn install_disk(
+    sh: &Shell,
+    image: &str,
+    work: &Path,
+    passphrase: Passphrase,
+) -> Result<PathBuf> {
     remove_instances(sh)?;
     if work.exists() {
-        fs::remove_dir_all(&work).with_context(|| format!("removing {}", work.display()))?;
+        fs::remove_dir_all(work).with_context(|| format!("removing {}", work.display()))?;
     }
-    fs::create_dir_all(&work)?;
+    fs::create_dir_all(work)?;
     let layout = work.join("image");
     cmd!(
         sh,
         "podman save --quiet --format oci-dir --output {layout} {image}"
     )
     .run()?;
-    write_private(&work.join("passphrase"), PASSPHRASE)?;
+    if passphrase == Passphrase::Fixed {
+        write_private(&work.join("passphrase"), PASSPHRASE)?;
+    }
     let disk = work.join("disk.raw");
     File::create(&disk)?.set_len(DISK_SIZE)?;
+    install(sh, image, work, &disk, passphrase)?;
+    Ok(disk)
+}
 
-    install(sh, image, &work, &disk)?;
-    let mut vm = Vm::boot(binary, &work, &disk)?;
-    vm.wait_for_ssh(sh)?;
-    vm.run_tests(sh, binary, args)?;
-    vm.power_off(sh)?;
-    vm.check_console()
+/// Boot the installed disk in a VM with a graphical console, and wait for
+/// it to power off. The boot will prompt for the disk's passphrase.
+pub(crate) fn boot_gui(disk: &Path) -> Result<()> {
+    // Registered before systemd-vmspawn starts, so no Ctrl-C is lost.
+    let mut signals = Signals::new([SIGINT, SIGTERM])?;
+    let mut vmspawn = vmspawn(disk)
+        .arg("--console=gui")
+        .stdin(Stdio::null())
+        // Ctrl-C in the terminal would also reach QEMU, which would quit
+        // before systemd-vmspawn shuts the VM down.
+        .process_group(0)
+        .spawn()
+        .map_err(vmspawn_error)?;
+    let pid = Pid::from_child(&vmspawn);
+    let handle = signals.handle();
+    // Returns whether it forwarded a signal.
+    let forward = thread::spawn(move || {
+        let mut interrupted = false;
+        for _ in signals.forever() {
+            interrupted = true;
+            let _ = kill_process(pid, Signal::TERM);
+        }
+        interrupted
+    });
+    let status = vmspawn.wait().context("waiting for systemd-vmspawn")?;
+    handle.close();
+    let interrupted = forward.join().unwrap_or(false);
+    ensure!(
+        status.success() || interrupted,
+        "systemd-vmspawn failed: {status}"
+    );
+    Ok(())
+}
+
+/// A systemd-vmspawn command booting `disk`.
+fn vmspawn(disk: &Path) -> Command {
+    let mut command = Command::new("systemd-vmspawn");
+    command
+        .arg(format!("--image={}", disk.display()))
+        .arg(format!("--machine={MACHINE}"))
+        // The VMs do not need TPM.
+        .args(["--ram=4G", "--register=no", "--tpm=no"]);
+    command
+}
+
+/// Explain a failure to start systemd-vmspawn.
+fn vmspawn_error(e: io::Error) -> anyhow::Error {
+    match e.kind() {
+        io::ErrorKind::NotFound => anyhow::anyhow!("systemd-vmspawn is not installed"),
+        _ => anyhow::Error::from(e).context("starting systemd-vmspawn"),
+    }
 }
 
 /// Remove a leftover installer container and VM.
@@ -129,20 +206,35 @@ fn write_private(path: &Path, content: &str) -> Result<()> {
 }
 
 /// Run `bootc-imagectl install` in a VM of the image against `disk`.
-fn install(sh: &Shell, image: &str, work: &Path, disk: &Path) -> Result<()> {
+fn install(
+    sh: &Shell,
+    image: &str,
+    work: &Path,
+    disk: &Path,
+    passphrase: Passphrase,
+) -> Result<()> {
     // Bound read-write: bcvk's read-only binds fail on kernels without
     // SELinux. TODO: report upstream and fix.
     let bind = format!("{}:install", work.display());
     let disk = format!("{}:target", disk.display());
     let filesystem = format!("--filesystem={}", filesystem());
-    cmd!(
+    let key_file =
+        (passphrase == Passphrase::Fixed).then(|| format!("--key-file={WORK}/passphrase"));
+    let install = cmd!(
         sh,
         "bcvk ephemeral run-ssh --rm --name {INSTALLER_CONTAINER} --bind {bind} --mount-disk-file {disk}
             --karg systemd.firstboot=no {image}
-            /usr/libexec/bootc-imagectl install --yes {filesystem} --key-file={WORK}/passphrase
+            /usr/libexec/bootc-imagectl install --yes {filesystem} {key_file...}
             --source-imgref=oci:{WORK}/image --target-imgref={image} {DISK}"
-    )
-    .run()?;
+    );
+    match passphrase {
+        Passphrase::Fixed => install.run()?,
+        // xshell would connect stdin to /dev/null.
+        Passphrase::Prompt => {
+            let status = Command::from(install).status().context("running bcvk")?;
+            ensure!(status.success(), "bcvk failed: {status}");
+        }
+    }
     Ok(())
 }
 
@@ -184,14 +276,10 @@ impl Vm {
 
         let journal = work.join("vm.journal");
         let cid = random_cid();
-        let vmspawn = Command::new("systemd-vmspawn")
+        let vmspawn = vmspawn(disk)
             .env("RUNTIME_DIRECTORY", &runtime_dir)
-            .arg(format!("--image={}", disk.display()))
-            .arg(format!("--machine={MACHINE}"))
-            .args(["--ram=4G", "--register=no", "--console=read-only"])
+            .arg("--console=read-only")
             .arg(format!("--vsock-cid={cid}"))
-            // The tests do not need TPM.
-            .arg("--tpm=no")
             .arg(format!(
                 "--set-credential=cryptsetup.passphrase:{PASSPHRASE}"
             ))
@@ -207,12 +295,7 @@ impl Vm {
             .stdout(File::create(work.join("console.log"))?)
             .stderr(File::create(work.join("vmspawn.log"))?)
             .spawn()
-            .map_err(|e| match e.kind() {
-                io::ErrorKind::NotFound => {
-                    anyhow::anyhow!("systemd-vmspawn is not installed")
-                }
-                _ => anyhow::Error::from(e).context("starting systemd-vmspawn"),
-            })?;
+            .map_err(vmspawn_error)?;
         Ok(Self {
             vmspawn,
             cid,

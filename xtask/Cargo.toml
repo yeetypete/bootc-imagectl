@@ -11,6 +11,7 @@ minijinja = { version = "2", default-features = false, features = ["serde"] }
 rand = "0.10"
 rustix = { version = "1", features = ["process"] }
 serde_json = { workspace = true }
+signal-hook = "0.4"
 xshell = { workspace = true }
 
 [lints]

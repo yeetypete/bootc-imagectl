@@ -9,12 +9,14 @@ use clap::{Args, Parser, ValueEnum};
 use serde_json::{Value, json};
 use xshell::{Shell, cmd};
 
+use crate::images::Source;
+
 mod container;
 mod images;
 mod install;
 mod vm;
 
-/// The repository the test images are tagged under.
+/// The repository the test images and examples are tagged under.
 const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 
 /// The environment variable setting `Build`.
@@ -41,10 +43,18 @@ enum Task {
         /// The image's tag, e.g. `ubuntu` or `ubuntu-homed`.
         image: String,
     },
+    /// Build an example, install it onto a disk and boot it in a VM with a
+    /// graphical console.
+    Example {
+        #[command(flatten)]
+        build: Build,
+        /// The example's directory in examples/, e.g. `ubuntu`.
+        name: String,
+    },
     /// Print the matrix of test jobs as JSON, consumable by GitHub Actions.
     Matrix,
-    /// Run a test binary against each variant of the images in
-    /// tests/images. Cargo runs this through `test`.
+    /// Run a test binary against each of the suite's images. Cargo runs
+    /// this through `test`.
     #[command(hide = true)]
     Runner {
         #[command(flatten)]
@@ -66,7 +76,7 @@ enum Suite {
     /// The tests in tests/vm, run in a VM booted from each image.
     Vm,
     /// The tests in tests/install, run in a VM booted from a disk each
-    /// image is installed onto.
+    /// image and example is installed onto.
     Install,
 }
 
@@ -80,7 +90,7 @@ struct Build {
     options: Vec<String>,
 }
 
-/// Which images in tests/images the tests run against.
+/// Which of the suite's images the tests run against.
 #[derive(Debug, Args)]
 struct Selection {
     /// Only run against the image with this tag, e.g. `fedora` or
@@ -117,6 +127,15 @@ impl Suite {
         }
     }
 
+    /// The images the suite runs against.
+    fn images(self) -> Result<Vec<images::Image>> {
+        let sources: &[Source] = match self {
+            Self::Container | Self::Vm => &[Source::Test],
+            Self::Install => &[Source::Test, Source::Example],
+        };
+        images::images(workspace_dir()?, sources)
+    }
+
     /// Run the test binary against `image`.
     fn run(self, sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> Result<()> {
         match self {
@@ -137,6 +156,7 @@ fn main() -> Result<()> {
             args,
         } => test(&sh, &build, &selection, suite, &args),
         Task::Vm { build, image } => boot(&sh, &build, &image),
+        Task::Example { build, name } => example(&sh, &build, &name),
         Task::Matrix => {
             println!("{}", serde_json::to_string_pretty(&matrix()?)?);
             Ok(())
@@ -153,12 +173,9 @@ fn main() -> Result<()> {
 
 /// The GitHub Actions matrix of test jobs.
 fn matrix() -> Result<Value> {
-    let tags: Vec<String> = images::images(&images_dir()?)?
-        .iter()
-        .map(images::Image::tag)
-        .collect();
     let mut jobs = Vec::new();
     for suite in Suite::value_variants() {
+        let tags: Vec<String> = suite.images()?.iter().map(images::Image::tag).collect();
         for image in &tags {
             let name = format!("test-{}-{image}", suite.name());
             match suite {
@@ -189,7 +206,7 @@ fn test(
     suite: Suite,
     args: &[OsString],
 ) -> Result<()> {
-    let variants = images::images(&images_dir()?)?;
+    let variants = suite.images()?;
     for tag in &selection.images {
         find_image(&variants, tag)?;
     }
@@ -219,12 +236,11 @@ fn test(
     Ok(())
 }
 
-/// The directory holding the test images.
-fn images_dir() -> Result<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent();
-    Ok(root
-        .context("finding the workspace root")?
-        .join("tests/images"))
+/// The root of the workspace.
+fn workspace_dir() -> Result<&'static Path> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("finding the workspace root")
 }
 
 /// The image tagged `tag` among `variants`.
@@ -238,9 +254,9 @@ fn find_image<'a>(variants: &'a [images::Image], tag: &str) -> Result<&'a images
         })
 }
 
-/// Build each selected variant of the images in tests/images and run the
-/// test binary against it. The tests of the other images live in modules
-/// named after them and are skipped.
+/// Build each of the suite's selected images and run the test binary
+/// against it. The tests of the other images live in modules named after
+/// them and are skipped.
 fn run(
     sh: &Shell,
     build: &Build,
@@ -249,18 +265,13 @@ fn run(
     binary: &Path,
     args: &[OsString],
 ) -> Result<()> {
-    let images = images_dir()?;
-    let variants = images::images(&images)?;
+    let variants = suite.images()?;
     let target = target_dir(binary)?;
     let selected = variants
         .iter()
         .filter(|image| selection.images.is_empty() || selection.images.contains(&image.tag()));
     for image in selected {
-        let tag = image.tag();
-        let dir = target.join("images").join(&tag);
-        let reference = format!("{REPOSITORY}:{tag}");
-        image.render(&images, &dir)?;
-        build.build(sh, &image.name, &reference, &dir, target)?;
+        let reference = build_image(sh, build, image, target)?;
         let mut args = args.to_vec();
         for other in variants.iter().filter(|other| *other != image) {
             args.push("--skip".into());
@@ -277,21 +288,57 @@ fn run(
     Ok(())
 }
 
-/// Build bootc-imagectl and the image tagged `tag`, then boot it in a VM.
+/// Build bootc-imagectl and the test image tagged `tag`, then boot it in a
+/// VM.
 fn boot(sh: &Shell, build: &Build, tag: &str) -> Result<()> {
-    let images = images_dir()?;
-    let variants = images::images(&images)?;
+    let variants = Suite::Vm.images()?;
     let image = find_image(&variants, tag)?;
+    let target = build_bootc_imagectl(sh)?;
+    let reference = build_image(sh, build, image, &target)?;
+    vm::boot(&reference)
+}
+
+/// Build bootc-imagectl and the example `name`, install it onto a disk and
+/// boot it with a graphical console.
+fn example(sh: &Shell, build: &Build, name: &str) -> Result<()> {
+    let examples = images::images(workspace_dir()?, &[Source::Example])?;
+    let image = examples
+        .iter()
+        .find(|image| image.name == name)
+        .with_context(|| {
+            let names: Vec<&str> = examples.iter().map(|image| image.name.as_str()).collect();
+            format!(
+                "no example named {name}, select one of: {}",
+                names.join(", ")
+            )
+        })?;
+    let target = build_bootc_imagectl(sh)?;
+    let reference = build_image(sh, build, image, &target)?;
+    let work = target.join("example");
+    let disk = install::install_disk(sh, &reference, &work, install::Passphrase::Prompt)?;
+    install::boot_gui(&disk)
+}
+
+/// Render `image` into `target`, build it and return its reference.
+fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) -> Result<String> {
+    let tag = image.tag();
+    let dir = target.join("images").join(&tag);
+    let reference = format!("{REPOSITORY}:{tag}");
+    image.render(workspace_dir()?, &dir)?;
+    build.build(sh, &image.build_name(), &reference, &dir, target)?;
+    Ok(reference)
+}
+
+/// Build bootc-imagectl and return the target directory holding it.
+fn build_bootc_imagectl(sh: &Shell) -> Result<PathBuf> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     cmd!(sh, "{cargo} build --locked --bin bootc-imagectl").run()?;
     // cargo builds bootc-imagectl next to this binary.
     let xtask = std::env::current_exe()?;
-    let target = xtask.parent().context("finding the target directory")?;
-    let dir = target.join("images").join(tag);
-    let reference = format!("{REPOSITORY}:{tag}");
-    image.render(&images, &dir)?;
-    build.build(sh, &image.name, &reference, &dir, target)?;
-    vm::boot(&reference)
+    Ok(xtask
+        .parent()
+        .context("finding the target directory")?
+        .to_owned())
 }
 
 /// The target profile directory holding `binary` and bootc-imagectl.
