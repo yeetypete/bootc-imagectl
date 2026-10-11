@@ -21,14 +21,19 @@ enum Variant {
     /// The image has no regular user. systemd-homed's first boot wizard
     /// creates it.
     Homed,
+    /// The image is signed for Secure Boot.
+    SecureBoot,
 }
 
 impl Variant {
-    const ALL: [Self; 2] = [Self::Default, Self::Homed];
+    const ALL: [Self; 3] = [Self::Default, Self::Homed, Self::SecureBoot];
 
     /// The variables the templates see.
     fn context(self) -> Value {
-        context! { homed => self == Self::Homed }
+        context! {
+            homed => self == Self::Homed,
+            secureboot => self == Self::SecureBoot,
+        }
     }
 }
 
@@ -37,7 +42,7 @@ impl Variant {
 pub(crate) enum Source {
     /// A test image in tests/images, built once per variant.
     Test,
-    /// An example in examples/, built as is.
+    /// An example in examples/.
     Example,
 }
 
@@ -75,6 +80,7 @@ impl Image {
             (Source::Example, _) => format!("{}-example", self.name),
             (Source::Test, Variant::Default) => self.name.clone(),
             (Source::Test, Variant::Homed) => format!("{}-homed", self.name),
+            (Source::Test, Variant::SecureBoot) => format!("{}-secureboot", self.name),
         }
     }
 
@@ -84,6 +90,11 @@ impl Image {
             Source::Test => self.name.clone(),
             Source::Example => self.tag(),
         }
+    }
+
+    /// Whether the image is signed for Secure Boot.
+    pub(crate) fn secure_boot(&self) -> bool {
+        self.source == Source::Example || self.variant == Variant::SecureBoot
     }
 
     /// The module holding the image's tests, named after its tag.

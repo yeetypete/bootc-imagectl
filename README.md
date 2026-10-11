@@ -60,6 +60,18 @@ it if it must never run. Manual calls to `systemctl disable` would be undone whe
 
 End the build with `bootc container lint` to check the image.
 
+## Secure Boot
+
+To sign the image for Secure Boot, pass a key as a build secret and its
+certificate to `finalize` and `bootc container ukify` (see the
+[example](examples/ubuntu/Containerfile)).
+`finalize` signs systemd-boot and stages the certificate for systemd-boot to
+enroll. This needs systemd 257 or newer.
+
+To enroll the key, put the firmware in setup mode, then pick
+*Enroll Secure Boot keys: auto* in the boot menu. This replaces the firmware's
+keys, including Microsoft's.
+
 ## Installing
 
 From a live system, e.g. a USB stick with one of the supported Linux distributions
