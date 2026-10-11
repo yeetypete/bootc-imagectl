@@ -18,7 +18,22 @@ struct Devices {
 struct Device {
     #[serde(rename = "type")]
     kind: String,
+    /// The parent device's name, if requested.
+    pkname: Option<String>,
     mountpoints: Vec<Option<String>>,
+}
+
+/// The LUKS2 metadata, as reported by `cryptsetup luksDump
+/// --dump-json-metadata`.
+#[derive(Debug, Deserialize)]
+struct LuksMetadata {
+    config: LuksConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct LuksConfig {
+    #[serde(default)]
+    flags: Vec<String>,
 }
 
 #[test]
@@ -57,6 +72,35 @@ fn unlocks_encrypted_root() -> Result<()> {
     assert!(
         crypt.mountpoints.iter().flatten().any(|m| m == "/sysroot"),
         "{crypt:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn allows_discards_on_encrypted_root() -> Result<()> {
+    let output = Command::new("lsblk")
+        .args(["--json", "--list", "--output", "TYPE,PKNAME,MOUNTPOINTS"])
+        .output_string()?;
+    let devices: Devices = serde_json::from_str(&output)?;
+    let partition = devices
+        .blockdevices
+        .iter()
+        .find(|device| device.kind == "crypt")
+        .and_then(|crypt| crypt.pkname.as_deref())
+        .expect("the partition of an unlocked LUKS device");
+    let output = Command::new("cryptsetup")
+        .args(["luksDump", "--dump-json-metadata"])
+        .arg(format!("/dev/{partition}"))
+        .output_string()?;
+    let metadata: LuksMetadata = serde_json::from_str(&output)?;
+    assert!(
+        metadata
+            .config
+            .flags
+            .iter()
+            .any(|flag| flag == "allow-discards"),
+        "{:?}",
+        metadata.config.flags
     );
     Ok(())
 }

@@ -60,10 +60,9 @@ pub(super) fn write_definitions(
 ) -> Result<Utf8PathBuf> {
     let definitions = dir.join("repart.d");
     fs::create_dir(&definitions).with_context(|| format!("creating {definitions}"))?;
-    // A passphrase reaches systemd-repart as its --key-file. Discard=yes keeps
-    // LUKS allow-discards despite --discard=no.
+    // A passphrase reaches systemd-repart as its --key-file.
     let encryption = match encrypt {
-        Encrypt::Passphrase => "Encrypt=key-file\nDiscard=yes\n",
+        Encrypt::Passphrase => "Encrypt=key-file\n",
         Encrypt::Off => "Encrypt=off\n",
     };
     let root = format!(
@@ -144,7 +143,6 @@ mod tests {
                 Label=root
                 Format=ext4
                 Encrypt=key-file
-                Discard=yes
             "}
         );
     }

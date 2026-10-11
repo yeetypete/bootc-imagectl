@@ -321,6 +321,8 @@ impl Mapping {
         Command::new("cryptsetup")
             .arg("open")
             .arg(format!("--key-file={key_file}"))
+            // Persists the flag, so the installed system passes discards on.
+            .args(["--allow-discards", "--persistent"])
             .args([partition.as_str(), MAPPING])
             .run()?;
         Ok(Self {
