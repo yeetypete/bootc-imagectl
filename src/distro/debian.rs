@@ -1,6 +1,7 @@
 //! Debian and derivatives.
 
 use std::collections::BTreeSet;
+use std::io::Read;
 use std::process::Command;
 use std::str::FromStr;
 
@@ -8,6 +9,7 @@ use anyhow::{Context, Result, bail, ensure};
 use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
+use flate2::bufread::GzDecoder;
 use tracing::debug;
 
 use super::{Distro, PackageName, SYSIMAGE};
@@ -148,15 +150,36 @@ impl Distro for Debian {
 
     /// Stage the kernel where bootc looks for it. The kernel package installs
     /// it under /boot.
+    ///
+    /// On arm64 the kernel package installs a gzip-compressed EFI image, which
+    /// systemd-stub cannot boot from a UKI. It is staged decompressed, which
+    /// keeps the signature of the EFI image inside.
     fn stage_kernel(&self, root: &Dir, kver: &str) -> Result<()> {
         let staged = format!("usr/lib/modules/{kver}/vmlinuz");
         let installed = format!("boot/vmlinuz-{kver}");
         if root.exists(&staged) || !root.exists(&installed) {
             return Ok(());
         }
+        let contents = root
+            .read(&installed)
+            .with_context(|| format!("reading /{installed}"))?;
+        let mut decoder = GzDecoder::new(contents.as_slice());
+        let kernel = if decoder.header().is_some() {
+            debug!("decompressing /{installed}");
+            let mut kernel = Vec::new();
+            decoder
+                .read_to_end(&mut kernel)
+                .with_context(|| format!("decompressing /{installed}"))?;
+            kernel
+        } else {
+            contents
+        };
         debug!("staging /{installed} at /{staged}");
-        root.copy(&installed, root, &staged)
-            .with_context(|| format!("copying /{installed} to /{staged}"))?;
+        root.write(&staged, kernel)
+            .with_context(|| format!("writing /{staged}"))?;
+        let permissions = root.metadata(&installed)?.permissions();
+        root.set_permissions(&staged, permissions)
+            .with_context(|| format!("setting the mode of /{staged}"))?;
         Ok(())
     }
 
@@ -287,6 +310,12 @@ fn query(args: &[&str], not_found: &str) -> Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
+    use cap_std_ext::cap_std::fs_utf8::{Permissions, PermissionsExt};
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
     use super::*;
     use crate::testutil::rootfs;
 
@@ -390,6 +419,25 @@ mod tests {
             "kernel"
         );
         DEBIAN.stage_kernel(&root, "7.0.0-32-generic")?;
+        Ok(())
+    }
+
+    #[test]
+    fn stages_compressed_kernel_decompressed() -> Result<()> {
+        let root = rootfs()?;
+        root.create_dir_all("boot")?;
+        root.create_dir_all("usr/lib/modules/7.0.0-31-generic")?;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(b"MZ kernel")?;
+        root.write("boot/vmlinuz-7.0.0-31-generic", encoder.finish()?)?;
+        root.set_permissions(
+            "boot/vmlinuz-7.0.0-31-generic",
+            Permissions::from_mode(0o600),
+        )?;
+        DEBIAN.stage_kernel(&root, "7.0.0-31-generic")?;
+        let staged = "usr/lib/modules/7.0.0-31-generic/vmlinuz";
+        assert_eq!(root.read(staged)?, b"MZ kernel");
+        assert_eq!(root.metadata(staged)?.permissions().mode() & 0o777, 0o600);
         Ok(())
     }
 

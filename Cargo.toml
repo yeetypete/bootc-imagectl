@@ -53,6 +53,7 @@ anyhow = { workspace = true }
 camino = { version = "1", features = ["serde1"] }
 cap-std-ext = { version = "5", features = ["fs_utf8"] }
 clap = { workspace = true }
+flate2 = "1"
 rpassword = "7"
 rustix = { version = "1", features = ["mount", "process", "time"] }
 serde = { version = "1", features = ["derive"] }
