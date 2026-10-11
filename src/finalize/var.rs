@@ -381,6 +381,30 @@ mod tests {
     }
 
     #[test]
+    fn records_directories_tmpfiles_only_adjusts() -> Result<()> {
+        let root = rootfs()?;
+        let db = accounts(&root)?;
+        root.create_dir_all("var/log/journal")?;
+        root.set_permissions("var/log/journal", Permissions::from_mode(0o2755))?;
+        let declared = tmpfiles::declared_paths(indoc! {"
+            d /var/log 0755 - - -
+            h /var/log/journal - - - - +C
+            z /var/log/journal 2755 root systemd-journal - -
+            a+ /var/log/journal - - - - d:group::r-x
+        "});
+
+        write_var_tmpfiles(&root, &db, &declared)?;
+
+        let content = generated(&root, 1)?;
+        assert!(
+            content.contains("d /var/log/journal 2755 foo bar -"),
+            "{content}"
+        );
+        assert!(!content.contains("d /var/log "), "{content}");
+        Ok(())
+    }
+
+    #[test]
     fn writes_no_file_when_everything_is_declared() -> Result<()> {
         let root = rootfs()?;
         let db = accounts(&root)?;
