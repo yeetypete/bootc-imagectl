@@ -10,7 +10,7 @@
 //! first, adds a `disable *` catchall if the policy lacks one, and then
 //! applies the policy with `systemctl preset-all --preset-mode=enable-only`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::process::Command;
 use std::str::FromStr;
@@ -111,7 +111,7 @@ impl FromStr for Directive {
 /// The directives that enable the units the image enables.
 fn enable_directives(
     units: &[UnitFile],
-    instances: &BTreeMap<String, Vec<String>>,
+    instances: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<Directive> {
     let mut directives = Vec::new();
     for unit in units {
@@ -121,7 +121,7 @@ fn enable_directives(
             UnitName::Template => {
                 if let Some(instances) = instances.get(&unit.name) {
                     directives.push(Directive {
-                        instances: instances.clone(),
+                        instances: instances.iter().cloned().collect(),
                         ..Directive::new(Action::Enable, &unit.name)
                     });
                 }
@@ -207,10 +207,13 @@ mod tests {
             ]
         "#})?;
         let instances = BTreeMap::from([
-            ("getty@.service".to_owned(), vec!["tty2".to_owned()]),
+            (
+                "getty@.service".to_owned(),
+                BTreeSet::from(["tty2".to_owned()]),
+            ),
             (
                 "serial-getty@.service".to_owned(),
-                vec!["ttyS0".to_owned(), "ttyS1".to_owned()],
+                BTreeSet::from(["ttyS1".to_owned(), "ttyS0".to_owned()]),
             ),
         ]);
         let directives: Vec<String> = enable_directives(&units, &instances)

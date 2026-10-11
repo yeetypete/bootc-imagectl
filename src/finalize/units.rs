@@ -1,10 +1,11 @@
 //! The systemd units an image enables.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 use std::process::Command;
+use std::str::FromStr;
 
 use anyhow::{Context, Result};
+use camino::Utf8PathBuf;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use serde::Deserialize;
@@ -82,7 +83,7 @@ pub(super) fn is_enabled(root: &Dir, unit_files: &[UnitFile], name: &str) -> Res
     Ok(match unit.state {
         EnablementState::Masked | EnablementState::MaskedRuntime => false,
         EnablementState::Enabled => true,
-        _ => linked_units(root, VENDOR_UNIT_DIR)?.contains(name),
+        _ => dependencies(root, VENDOR_UNIT_DIR)?.contains(name),
     })
 }
 
@@ -114,12 +115,49 @@ impl<'a> From<&'a str> for UnitName<'a> {
     }
 }
 
-/// The names of the units linked from the `.wants/`, `.requires/` and
-/// `.upholds/` directories in `dir`.
-fn linked_units(root: &Dir, dir: &str) -> Result<BTreeSet<String>> {
-    let mut linked = BTreeSet::new();
+impl<'a> UnitName<'a> {
+    /// The instance, if this names an instance of `template`.
+    fn instance_of(&self, template: &str) -> Option<&'a str> {
+        match self {
+            Self::Instance {
+                template: of,
+                instance,
+            } if of == template => Some(instance),
+            _ => None,
+        }
+    }
+}
+
+/// A unit's `systemctl is-enabled --full` output: its enablement state,
+/// followed by its installation targets, the indented symlinks that enable it.
+#[derive(Debug, PartialEq, Eq)]
+struct IsEnabled {
+    symlinks: Vec<Utf8PathBuf>,
+}
+
+impl FromStr for IsEnabled {
+    type Err = anyhow::Error;
+
+    fn from_str(output: &str) -> Result<Self> {
+        let mut lines = output.lines();
+        lines.next().context("no state")?;
+        let symlinks = lines
+            .map(|line| {
+                line.strip_prefix("  ")
+                    .map(Utf8PathBuf::from)
+                    .with_context(|| format!("{line:?} is not an indented symlink"))
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self { symlinks })
+    }
+}
+
+/// The names of the units symlinked from the `.wants/`, `.requires/` and
+/// `.upholds/` directories in `dir`, which systemd adds as dependencies.
+fn dependencies(root: &Dir, dir: &str) -> Result<BTreeSet<String>> {
+    let mut dependencies = BTreeSet::new();
     let Some(units) = root.open_dir_optional(dir)? else {
-        return Ok(linked);
+        return Ok(dependencies);
     };
     for entry in units.entries()? {
         let entry = entry?;
@@ -130,11 +168,11 @@ fn linked_units(root: &Dir, dir: &str) -> Result<BTreeSet<String>> {
         if !is_dependency_dir || !entry.file_type()?.is_dir() {
             continue;
         }
-        for link in units.read_dir(&dir)? {
-            linked.insert(link?.file_name()?);
+        for symlink in units.read_dir(&dir)? {
+            dependencies.insert(symlink?.file_name()?);
         }
     }
-    Ok(linked)
+    Ok(dependencies)
 }
 
 /// The enabled instance names of each template unit in `unit_files`.
@@ -142,58 +180,35 @@ fn linked_units(root: &Dir, dir: &str) -> Result<BTreeSet<String>> {
 /// # Errors
 ///
 /// Fails if systemctl fails.
-pub(super) fn enabled_instances(unit_files: &[UnitFile]) -> Result<BTreeMap<String, Vec<String>>> {
+pub(super) fn enabled_instances(
+    unit_files: &[UnitFile],
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    let mut instances = BTreeMap::new();
     // A template is indirect if it has enabled instances but no default
     // instance.
-    let templates: Vec<&str> = unit_files
-        .iter()
-        .filter(|unit| {
-            UnitName::from(unit.name.as_str()) == UnitName::Template
-                && matches!(
-                    unit.state,
-                    EnablementState::Enabled | EnablementState::Indirect
-                )
-        })
-        .map(|unit| unit.name.as_str())
-        .collect();
-    if templates.is_empty() {
-        return Ok(BTreeMap::new());
+    for unit in unit_files.iter().filter(|unit| {
+        UnitName::from(unit.name.as_str()) == UnitName::Template
+            && matches!(
+                unit.state,
+                EnablementState::Enabled | EnablementState::Indirect
+            )
+    }) {
+        let output: IsEnabled = Command::new("systemctl")
+            .args(["is-enabled", "--root=/", "--full", &unit.name])
+            .output_string()?
+            .parse()
+            .with_context(|| format!("parsing systemctl is-enabled {}", unit.name))?;
+        // The symlinks include aliases, e.g. autovt@.service of
+        // getty@.service.
+        let enabled = output
+            .symlinks
+            .iter()
+            .filter_map(|symlink| UnitName::from(symlink.file_name()?).instance_of(&unit.name))
+            .map(str::to_owned)
+            .collect();
+        instances.insert(unit.name.clone(), enabled);
     }
-    let output = Command::new("systemctl")
-        .args(["is-enabled", "--root=/", "--full"])
-        .args(&templates)
-        .output_string()?;
-    Ok(parse_instances(&templates, &output))
-}
-
-/// The instances of `templates` linked in `systemctl is-enabled --full`
-/// output, which lists each template's state followed by its indented symlinks.
-fn parse_instances(templates: &[&str], output: &str) -> BTreeMap<String, Vec<String>> {
-    let mut instances = BTreeMap::<String, Vec<String>>::new();
-    let mut templates = templates.iter();
-    let mut template = None;
-    for line in output.lines() {
-        let Some(link) = line.strip_prefix("  ") else {
-            template = templates.next();
-            continue;
-        };
-        let (Some(template), Some(name)) = (template, Path::new(link).file_name()) else {
-            continue;
-        };
-        // The symlinks include aliases, e.g. autovt@.service of getty@.service.
-        if let UnitName::Instance {
-            template: of,
-            instance,
-        } = UnitName::from(name.to_string_lossy().as_ref())
-            && of == **template
-        {
-            instances
-                .entry((*template).to_owned())
-                .or_default()
-                .push(instance.to_owned());
-        }
-    }
-    instances
+    Ok(instances)
 }
 
 #[cfg(test)]
@@ -221,25 +236,38 @@ mod tests {
     }
 
     #[test]
-    fn parses_enabled_instances() {
+    fn finds_instances_of_template() {
+        let instance = UnitName::from("getty@tty1.service");
+        assert_eq!(instance.instance_of("getty@.service"), Some("tty1"));
+        assert_eq!(instance.instance_of("serial-getty@.service"), None);
+        assert_eq!(
+            UnitName::from("autovt@.service").instance_of("getty@.service"),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_is_enabled() -> Result<()> {
         let output = indoc! {"
-            indirect
-              /etc/systemd/system/getty.target.wants/serial-getty@ttyS1.service
-              /etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service
             enabled
               /etc/systemd/system/getty.target.wants/getty@tty1.service
               /etc/systemd/system/autovt@.service
         "};
         assert_eq!(
-            parse_instances(&["serial-getty@.service", "getty@.service"], output),
-            BTreeMap::from([
-                ("getty@.service".to_owned(), vec!["tty1".to_owned()]),
-                (
-                    "serial-getty@.service".to_owned(),
-                    vec!["ttyS1".to_owned(), "ttyS0".to_owned()]
-                ),
-            ])
+            output.parse::<IsEnabled>()?.symlinks,
+            [
+                "/etc/systemd/system/getty.target.wants/getty@tty1.service",
+                "/etc/systemd/system/autovt@.service",
+            ]
         );
+        assert!("disabled\n".parse::<IsEnabled>()?.symlinks.is_empty());
+        assert!("".parse::<IsEnabled>().is_err());
+        assert!(
+            "enabled\n/etc/systemd/system/x.service\n"
+                .parse::<IsEnabled>()
+                .is_err()
+        );
+        Ok(())
     }
 
     #[test]
