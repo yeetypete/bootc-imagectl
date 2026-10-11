@@ -30,6 +30,6 @@ fn keeps_account_files_unchanged_after_first_boot() -> Result<()> {
 }
 
 #[test]
-fn keeps_enabled_units_after_first_boot() -> Result<()> {
-    units::are_enabled(&["sshd.service", "systemd-timesyncd.service"])
+fn keeps_units_unchanged_after_first_boot() -> Result<()> {
+    units::unchanged_after_first_boot()
 }

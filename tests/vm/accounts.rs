@@ -1,7 +1,6 @@
 //! Check the moved users in the booted image, for every distribution.
 
 use std::io::Write as _;
-use std::os::unix::fs::MetadataExt as _;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context as _, Result};
@@ -9,7 +8,8 @@ use bootc_imagectl::command::CommandRunExt;
 use bootc_imagectl::testing;
 use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs_utf8::Dir;
-use rustix::time::{ClockId, clock_gettime};
+
+use crate::boot_time;
 
 pub(crate) struct MovedUser {
     pub(crate) name: &'static str,
@@ -83,18 +83,11 @@ pub(crate) fn account_files_unchanged() -> Result<()> {
     let boot = boot_time();
     for file in ["/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow"] {
         let mtime = std::fs::metadata(file)
-            .with_context(|| format!("reading {file}"))?
-            .mtime();
+            .and_then(|metadata| metadata.modified())
+            .with_context(|| format!("reading {file}"))?;
         assert!(mtime < boot, "{file} was written at boot");
     }
 
     let root = Dir::open_ambient_dir("/", ambient_authority())?;
     testing::etc_contains_only_root_and_nobody(&root)
-}
-
-/// The time the system booted, in seconds since the epoch.
-fn boot_time() -> i64 {
-    let now = clock_gettime(ClockId::Realtime);
-    let since_boot = clock_gettime(ClockId::Boottime);
-    now.tv_sec - since_boot.tv_sec
 }

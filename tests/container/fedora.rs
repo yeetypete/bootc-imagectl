@@ -9,8 +9,10 @@ use crate::finalize::{ROOT, names, preset_changes, var_tmpfiles};
 
 #[test]
 fn applies_full_preset_policy() -> Result<()> {
-    // Fedora's first boot applies the policy in full, not only its enables as
-    // finalize does, so a full run must find nothing to disable either.
+    // finalize runs `systemctl preset-all --preset-mode=enable-only`, which
+    // never disables a unit. On Fedora, the first boot runs `systemctl
+    // preset-all --preset-mode=full`, which also disables the units that the
+    // preset files disable. Check that it changes no unit of the image.
     let changes = preset_changes("full")?;
     assert!(changes.is_empty(), "{changes:#?}");
     Ok(())
