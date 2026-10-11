@@ -5,7 +5,7 @@ use std::process::Command;
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
 
-use crate::{homed, status};
+use crate::{homed, secureboot, status};
 
 #[test]
 fn updates_from_target_imgref() -> Result<()> {
@@ -27,5 +27,11 @@ fn starts_display_manager() -> Result<()> {
     Command::new("systemctl")
         .args(["is-active", "graphical.target", "gdm.service"])
         .output_string()?;
+    Ok(())
+}
+
+#[test]
+fn boots_with_secure_boot() -> Result<()> {
+    assert!(secureboot::enabled()?);
     Ok(())
 }
