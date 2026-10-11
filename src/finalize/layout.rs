@@ -12,7 +12,7 @@ use super::tmpfiles::{self, Entry};
 
 /// The toplevel layout of a bootc system as tmpfiles.d entries. The symlinks
 /// are created in the image. The directories they point to are created at
-/// boot by systemd. Note that bootc creates /sysroot/ostree itself.
+/// boot by systemd.
 const LAYOUT: &[Entry<'static>] = &[
     Entry::Symlink {
         path: "/home",
@@ -64,11 +64,10 @@ const LAYOUT: &[Entry<'static>] = &[
         user: "root",
         group: "root",
     },
-    Entry::Symlink {
-        path: "/ostree",
-        target: "sysroot/ostree",
-    },
 ];
+
+/// bootc's setup-root configuration.
+const SETUP_ROOT_CONF: &str = "usr/lib/composefs/setup-root-conf.toml";
 
 /// Lay out the toplevel directories and symlinks, and drop the tmpfiles.d
 /// entries that conflict with them.
@@ -107,6 +106,12 @@ fn layout_toplevel(root: &Dir) -> Result<()> {
     root.create_dir_all("sysroot")
         .context("creating /sysroot")?;
     root.create_dir_all("var").context("creating /var")?;
+
+    if !root.try_exists(SETUP_ROOT_CONF)? {
+        root.create_dir_all("usr/lib/composefs")?;
+        root.write(SETUP_ROOT_CONF, "")
+            .with_context(|| format!("writing /{SETUP_ROOT_CONF}"))?;
+    }
     Ok(())
 }
 
@@ -148,6 +153,21 @@ mod tests {
         assert_eq!(root.read_dir("boot")?.count(), 1);
         assert!(root.is_dir("sysroot"));
         assert!(root.is_dir("var"));
+        Ok(())
+    }
+
+    #[test]
+    fn marks_composefs_native_and_keeps_setup_root_conf() -> Result<()> {
+        let root = rootfs()?;
+        layout_toplevel(&root)?;
+        assert_eq!(root.read_to_string(SETUP_ROOT_CONF)?, "");
+
+        root.write(SETUP_ROOT_CONF, "[etc]\ntransient = true\n")?;
+        layout_toplevel(&root)?;
+        assert_eq!(
+            root.read_to_string(SETUP_ROOT_CONF)?,
+            "[etc]\ntransient = true\n"
+        );
         Ok(())
     }
 

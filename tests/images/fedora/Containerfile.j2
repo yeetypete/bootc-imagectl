@@ -36,6 +36,11 @@ RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     systemd-ukify \
     zstd
 
+# WORKAROUND: bootc 1.17, which accepts composefs-native images without ostree's
+# files, is only in updates-testing.
+RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
+    dnf upgrade -y --setopt=keepcache=True --enablerepo=updates-testing bootc-1.17.1
+
 {% if not homed %}
 # A regular user with a password and a group, for the tests of the user
 # records.
@@ -67,6 +72,8 @@ FROM finalized AS rootfs
 
 RUN bootc container split-kernel-and-rootfs --output /kernel && \
     rm -r /kernel
+
+RUN bootc container lint --fatal-warnings
 
 
 # WORKAROUND: podman < 6.0 (buildah 1.44) leaves bind-mounted stages out of

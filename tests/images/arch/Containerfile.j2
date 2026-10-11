@@ -8,7 +8,7 @@ RUN chmod -R go-w /system_files
 
 FROM ${ARCH_IMAGE} AS bootc-builder
 
-ARG BOOTC_VERSION=v1.16.10
+ARG BOOTC_VERSION=v1.17.1
 
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman-key --init && pacman-key --populate archlinux && \
@@ -26,7 +26,8 @@ RUN git clone --depth 1 --branch "${BOOTC_VERSION}" https://github.com/bootc-dev
 
 RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
     --mount=type=cache,target=/bootc/target,sharing=locked \
-    make bin install DESTDIR=/out
+    make bin install DESTDIR=/out \
+      CARGO_OPTIONS=--no-default-features
 
 
 FROM ${ARCH_IMAGE} AS image
@@ -91,6 +92,10 @@ FROM finalized AS rootfs
 
 RUN bootc container split-kernel-and-rootfs --output /kernel && \
     rm -r /kernel
+
+# runtime-deps requires chcon, which Arch's coreutils lacks. bootc only runs it
+# with SELinux.
+RUN bootc container lint --fatal-warnings --skip runtime-deps
 
 
 # WORKAROUND: podman < 6.0 (buildah 1.44) leaves bind-mounted stages out of
