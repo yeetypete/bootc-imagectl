@@ -50,7 +50,7 @@ pub struct FinalizeOpts {
     pub sysusers_lock: Utf8PathBuf,
 
     /// The private key that signs for Secure Boot, in PEM form, e.g.
-    /// `/run/secureboot.key` from a build secret.
+    /// `/run/secrets/secureboot_key` from a build secret.
     #[arg(long, value_name = "PATH", requires = "secureboot_certificate")]
     pub secureboot_private_key: Option<Utf8PathBuf>,
 

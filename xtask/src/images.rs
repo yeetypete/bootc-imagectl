@@ -42,7 +42,7 @@ impl Variant {
 pub(crate) enum Source {
     /// A test image in tests/images, built once per variant.
     Test,
-    /// An example in examples/, built as is.
+    /// An example in examples/.
     Example,
 }
 
@@ -94,7 +94,7 @@ impl Image {
 
     /// Whether the image is signed for Secure Boot.
     pub(crate) fn secure_boot(&self) -> bool {
-        self.variant == Variant::SecureBoot
+        self.source == Source::Example || self.variant == Variant::SecureBoot
     }
 
     /// The module holding the image's tests, named after its tag.

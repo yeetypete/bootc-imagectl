@@ -111,11 +111,21 @@ CMD ["/sbin/init"]
 
 FROM image AS finalized
 
-# The directory holding bootc-imagectl is passed as a build context:
+# The directory holding bootc-imagectl, and one holding the Secure Boot
+# certificate, are passed as build contexts, the key as a secret:
 #
-#     podman build --build-context bootc-imagectl=target/release .
+#     podman build --build-context bootc-imagectl=target/release \
+#       --build-context secureboot=keys --secret id=secureboot_key,src=keys/secureboot.key .
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-RUN --network=none /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
+# finalize signs systemd-boot and stages the certificate for enrollment.
+# The certificate is bind-mounted so a new key invalidates the cache.
+RUN --network=none \
+    --mount=type=secret,id=secureboot_key \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
+    /usr/libexec/bootc-imagectl finalize \
+      --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf \
+      --secureboot-private-key /run/secrets/secureboot_key \
+      --secureboot-certificate /run/secureboot.crt
 
 
 # The UKI embeds the kernel and initramfs.
@@ -133,12 +143,18 @@ RUN bootc container lint --fatal-warnings
 FROM rootfs AS uki
 
 # The kernel and initramfs come from finalized, the systemd-stub from rootfs.
+# The UKI is signed with the same key as systemd-boot.
 RUN --mount=type=bind,from=rootfs,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
+    --mount=type=secret,id=secureboot_key \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
     kver="$(ls /kernel)" && \
     mkdir /uki && \
     bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
       -- --stub /target/usr/lib/systemd/boot/efi/linuxx64.efi.stub \
+      --signtool systemd-sbsign --no-sign-kernel \
+      --secureboot-private-key /run/secrets/secureboot_key \
+      --secureboot-certificate /run/secureboot.crt \
       --output "/uki/${kver}.efi"
 
 

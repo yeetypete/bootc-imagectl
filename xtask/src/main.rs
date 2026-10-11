@@ -358,7 +358,7 @@ fn example(sh: &Shell, build: &Build, name: &str) -> Result<()> {
     let reference = build_image(sh, build, image, &target)?;
     let work = target.join("example");
     let disk = install::install_disk(sh, &reference, &work, install::Passphrase::Prompt)?;
-    install::boot_gui(&disk)
+    install::boot_gui(sh, &disk, image.secure_boot())
 }
 
 /// Render `image` into `target`, build it and return its reference.
