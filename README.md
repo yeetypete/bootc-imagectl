@@ -53,6 +53,12 @@ the Containerfile, and rebuild. Later builds will fail in the same manner whenev
 a package adds a user or group not fixed in the lock file. This is your signal to
 add the new user or group to the lock file and rebuild.
 
+`finalize` applies the distribution's systemd presets and keeps the units the
+image enables enabled. To keep a unit disabled that a preset enables, add
+`disable <unit>` to a preset file in `/usr/lib/systemd/system-preset/`, or mask
+it if it must never run. Manual calls to `systemctl disable` would be undone when
+`finalize` applies the presets.
+
 ## Installing
 
 From a live system, e.g. a USB stick with one of the supported Linux distributions

@@ -32,7 +32,11 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
     if !units::is_enabled(root, &units::unit_files()?, UNIT)? {
         return Ok(());
     }
-    configure(root, distro, &units::cat_config(UNIT)?)
+    configure(
+        root,
+        distro,
+        &units::cat_config(&format!("systemd/system/{UNIT}"))?,
+    )
 }
 
 /// Configure the wizard from its [`units::cat_config`] output.

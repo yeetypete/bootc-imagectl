@@ -5,7 +5,16 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::accounts::{self, MovedAccounts};
-use crate::finalize::{ROOT, names, var_tmpfiles};
+use crate::finalize::{ROOT, names, preset_changes, var_tmpfiles};
+
+#[test]
+fn applies_full_preset_policy() -> Result<()> {
+    // Fedora's first boot applies the policy in full, not only its enables as
+    // finalize does, so a full run must find nothing to disable either.
+    let changes = preset_changes("full")?;
+    assert!(changes.is_empty(), "{changes:#?}");
+    Ok(())
+}
 
 #[test]
 fn keeps_rpm_database_under_usr() -> Result<()> {
@@ -27,6 +36,7 @@ fn records_enabled_units_in_presets() -> Result<()> {
         "{presets}"
     );
     assert!(!presets.contains("disable"), "{presets}");
+    assert!(!ROOT.exists("usr/lib/systemd/system-preset/99-bootc-imagectl-default.preset"));
     Ok(())
 }
 

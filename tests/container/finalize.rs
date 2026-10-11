@@ -110,6 +110,29 @@ fn sets_up_tmp_run_and_lock_in_var() -> Result<()> {
     Ok(())
 }
 
+/// The symlinks `systemctl preset-all` changes in `mode`.
+pub(crate) fn preset_changes(mode: &str) -> Result<Vec<String>> {
+    let output = Command::new("systemctl")
+        .args(["preset-all", "--root=/"])
+        .arg(format!("--preset-mode={mode}"))
+        .output()?;
+    assert!(output.status.success(), "{output:?}");
+    Ok(String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter(|line| line.starts_with("Created symlink") || line.starts_with("Removed"))
+        .map(str::to_owned)
+        .collect())
+}
+
+#[test]
+fn applies_preset_policy() -> Result<()> {
+    // The first boot applies the policy again, so it must find nothing to
+    // enable.
+    let changes = preset_changes("enable-only")?;
+    assert!(changes.is_empty(), "{changes:#?}");
+    Ok(())
+}
+
 #[test]
 fn removes_machine_identity() -> Result<()> {
     assert_eq!(ROOT.read("etc/machine-id")?, b"uninitialized\n");

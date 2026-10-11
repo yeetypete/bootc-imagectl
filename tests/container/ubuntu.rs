@@ -6,7 +6,6 @@ use anyhow::Result;
 
 use crate::accounts::{self, MovedAccounts};
 use crate::finalize::{ROOT, names, var_tmpfiles};
-use crate::homed;
 
 #[test]
 fn moves_dpkg_database_and_links_it_back() -> Result<()> {
@@ -43,15 +42,12 @@ fn removes_snakeoil_certificate() -> Result<()> {
 }
 
 #[test]
-fn records_enabled_units_in_presets() {
-    // Ubuntu's presets enable every unit the image enables.
-    assert!(!ROOT.exists("usr/lib/systemd/system-preset/10-bootc-imagectl.preset"));
-}
-
-#[test]
-fn adds_wizard_user_to_groups() -> Result<()> {
-    // The presets enable the wizard. It creates no user since the image has one.
-    homed::adds_wizard_user_to(&["sudo", "adm", "cdrom", "dip", "plugdev", "users"])
+fn adds_catchall_to_presets() -> Result<()> {
+    // Ubuntu's presets have no catchall, so they would enable every unit.
+    let presets =
+        ROOT.read_to_string("usr/lib/systemd/system-preset/99-bootc-imagectl-default.preset")?;
+    assert!(presets.lines().any(|line| line == "disable *"), "{presets}");
+    Ok(())
 }
 
 /// The image's package users and its regular user.

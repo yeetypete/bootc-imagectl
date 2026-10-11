@@ -42,6 +42,8 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     info!("finalizing a {} rootfs", distro.name());
     systemd::check().context("checking the systemd version")?;
 
+    // First, so that the later steps see which units the system boots with.
+    presets::finalize(&root).context("applying the preset policy")?;
     homed::finalize(&root, distro).context("configuring the systemd-homed first boot wizard")?;
     accounts::finalize(&root, distro, &opts.sysusers_lock).context("finalizing the accounts")?;
     initramfs::finalize(&root, distro).context("building the initramfs")?;
@@ -49,7 +51,6 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     layout::finalize(&root).context("laying out the filesystem")?;
     kargs::finalize(&root).context("writing the kernel arguments")?;
     var::finalize(&root, distro).context("finalizing /var")?;
-    presets::finalize(&root).context("recording enabled units in a preset file")?;
 
     lint::bootc_lint()
 }
