@@ -43,9 +43,8 @@ is built:
 
 ## Building an image
 
-See [`tests/images/fedora/Containerfile`](tests/images/fedora/Containerfile)
-for a complete example. [`tests/images`](tests/images) has one for each
-supported distribution.
+See [`examples/ubuntu/Containerfile`](examples/ubuntu/Containerfile) for a
+complete example.
 
 On a first build, `finalize` will fail and print the lines the sysusers lock
 file must contain. Add them to `00-bootc-imagectl.lock.conf`, commit it next to

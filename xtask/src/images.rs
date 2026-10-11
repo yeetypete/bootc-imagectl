@@ -1,7 +1,7 @@
-//! Render the test images in tests/images from their templates.
+//! Render the test images in tests/images and the examples in examples/.
 //!
-//! Files ending in `.j2` are minijinja templates. Each image is rendered once
-//! per variant.
+//! Files ending in `.j2` are minijinja templates. Each test image is rendered
+//! once per variant.
 
 use std::fs;
 use std::os::unix::fs::symlink;
@@ -32,20 +32,57 @@ impl Variant {
     }
 }
 
-/// A variant of a test image.
+/// Where an image comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Source {
+    /// A test image in tests/images, built once per variant.
+    Test,
+    /// An example in examples/, built as is.
+    Example,
+}
+
+impl Source {
+    /// The variants each image is built as.
+    fn variants(self) -> &'static [Variant] {
+        match self {
+            Self::Test => &Variant::ALL,
+            Self::Example => &[Variant::Default],
+        }
+    }
+
+    /// The directory holding the images, relative to the workspace root.
+    fn dir(self) -> &'static str {
+        match self {
+            Self::Test => "tests/images",
+            Self::Example => "examples",
+        }
+    }
+}
+
+/// A variant of a test image, or an example.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Image {
-    /// The directory in tests/images the image is rendered from.
+    /// The directory the image is rendered from.
     pub(crate) name: String,
+    source: Source,
     variant: Variant,
 }
 
 impl Image {
     /// The image's tag.
     pub(crate) fn tag(&self) -> String {
-        match self.variant {
-            Variant::Default => self.name.clone(),
-            Variant::Homed => format!("{}-homed", self.name),
+        match (self.source, self.variant) {
+            (Source::Example, _) => format!("{}-example", self.name),
+            (Source::Test, Variant::Default) => self.name.clone(),
+            (Source::Test, Variant::Homed) => format!("{}-homed", self.name),
+        }
+    }
+
+    /// The name `{image}` stands for in build options.
+    pub(crate) fn build_name(&self) -> String {
+        match self.source {
+            Source::Test => self.name.clone(),
+            Source::Example => self.tag(),
         }
     }
 
@@ -54,8 +91,9 @@ impl Image {
         self.tag().replace('-', "_")
     }
 
-    /// Render the image from `images` into `out`, replacing `out` contents.
-    pub(crate) fn render(&self, images: &Path, out: &Path) -> Result<()> {
+    /// Render the image from the workspace at `root` into `out`, replacing
+    /// `out` contents.
+    pub(crate) fn render(&self, root: &Path, out: &Path) -> Result<()> {
         if out.exists() {
             fs::remove_dir_all(out).with_context(|| format!("removing {}", out.display()))?;
         }
@@ -64,26 +102,35 @@ impl Image {
         env.set_keep_trailing_newline(true);
         env.set_trim_blocks(true);
         env.set_lstrip_blocks(true);
-        render_dir(&env, &self.variant.context(), &images.join(&self.name), out)
+        let src = root.join(self.source.dir()).join(&self.name);
+        render_dir(&env, &self.variant.context(), &src, out)
     }
 }
 
-/// Every variant of the images in `dir`, sorted by tag.
-pub(crate) fn images(dir: &Path) -> Result<Vec<Image>> {
+/// The images from `sources` in the workspace at `root`, with every variant
+/// of the test images.
+pub(crate) fn images(root: &Path, sources: &[Source]) -> Result<Vec<Image>> {
+    let mut images = Vec::new();
+    for &source in sources {
+        for name in names(&root.join(source.dir()))? {
+            images.extend(source.variants().iter().map(|&variant| Image {
+                name: name.clone(),
+                source,
+                variant,
+            }));
+        }
+    }
+    Ok(images)
+}
+
+/// The names of the images in `dir`, sorted.
+fn names(dir: &Path) -> Result<Vec<String>> {
     let mut names: Vec<String> = fs::read_dir(dir)
         .with_context(|| format!("reading {}", dir.display()))?
         .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
         .collect::<Result<_>>()?;
     names.sort();
-    Ok(names
-        .into_iter()
-        .flat_map(|name| {
-            Variant::ALL.map(|variant| Image {
-                name: name.clone(),
-                variant,
-            })
-        })
-        .collect())
+    Ok(names)
 }
 
 /// Copy `src` to `dst`, rendering the templates.

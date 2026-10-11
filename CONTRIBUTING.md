@@ -10,6 +10,7 @@ just test            # Unit tests.
 just test-container  # Container tests.
 just test-vm         # VM tests.
 just test-install    # Install tests.
+just example ubuntu  # Install an example and boot it in a QEMU window.
 ```
 
 `bootc-imagectl` uses [prek](https://github.com/j178/prek) (or `pre-commit`)
@@ -18,7 +19,8 @@ hooks for linting and formatting. Install them with `prek install`.
 ## Tests
 
 `bootc-imagectl` has three test suites, which run against a real image of each
-distribution in [`tests/images`](tests/images):
+distribution in [`tests/images`](tests/images). The install tests also run
+against the images in [`examples`](examples), tagged `<name>-example`:
 
 | Suite | Command | Runs in | Host requirements |
 | --- | --- | --- | --- |
@@ -32,10 +34,10 @@ distribution in [`tests/images`](tests/images):
 
 The `just test-*` recipes run `cargo xtask test <suite>`. This command builds
 `bootc-imagectl` from the working tree, builds each image with it, then runs
-the suite's test binary in the image. Each image is also built as a
-`-homed` variant without a regular user. `--image <tag>` limits the run to
-one image, e.g. `just test-vm --image fedora-homed`. Other arguments after
-the suite go to the test binary, for example a test name filter.
+the suite's test binary in the image. Each image in `tests/images` is also
+built as a `-homed` variant without a regular user. `--image <tag>` limits the
+run to one image, e.g. `just test-vm --image fedora-homed`. Other arguments
+after the suite go to the test binary, for example a test name filter.
 
 Images are built with Podman. `--build-option` (or
 `BOOTC_IMAGECTL_BUILD_OPTIONS`) passes an option to `podman build`, such as a

@@ -29,6 +29,10 @@ vm image *args:
 test-install *args:
     cargo xtask test install {{ args }}
 
+# Install an example image and boot it in a VM with a graphical console.
+example name *args:
+    cargo xtask example {{ args }} {{ name }}
+
 # Build a release binary.
 build:
     cargo build --release --locked
