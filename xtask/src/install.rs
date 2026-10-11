@@ -149,7 +149,6 @@ fn install(sh: &Shell, image: &str, work: &Path, disk: &Path) -> Result<()> {
 /// The `home.create.` credential of `HOME_USER`.
 fn home_credential() -> String {
     let record = json!({
-        "storage": "directory",
         "secret": { "password": [HOME_PASSWORD] },
         "privileged": { "hashedPassword": [HOME_HASHED_PASSWORD] },
     });

@@ -42,7 +42,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
 
     // First, so that the later steps see which units the system boots with.
     presets::finalize(&root).context("applying the preset policy")?;
-    homed::finalize(&root, distro).context("configuring the systemd-homed first boot wizard")?;
+    homed::finalize(&root, distro).context("configuring systemd-homed")?;
     accounts::finalize(&root, distro, &opts.sysusers_lock).context("finalizing the accounts")?;
     initramfs::finalize(&root, distro).context("building the initramfs")?;
     identity::finalize(&root, distro).context("removing the machine identity")?;

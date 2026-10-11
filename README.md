@@ -78,6 +78,10 @@ system will update it based on the image reference it was installed from.
 The root filesystem is ext4 by default. Pass `--filesystem btrfs` to use btrfs
 instead. The image must then ship `mkfs.btrfs`, e.g. from `btrfs-progs`.
 
+Since the root is encrypted, systemd-homed stores homes without encrypting them
+again. For installs with `--encrypt off`, set `DefaultStorage=luks` in a
+`/usr/lib/systemd/homed.conf.d/60-*.conf` drop-in.
+
 ## First boot
 
 On first boot, systemd-firstboot will ask for settings the image leaves

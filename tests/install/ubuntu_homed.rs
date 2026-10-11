@@ -13,3 +13,8 @@ fn updates_from_target_imgref() -> Result<()> {
 fn adds_wizard_user_to_groups() -> Result<()> {
     homed::adds_wizard_user_to(&["sudo", "adm", "cdrom", "dip", "plugdev", "users"])
 }
+
+#[test]
+fn stores_wizard_user_unencrypted() -> Result<()> {
+    homed::stores_wizard_user_unencrypted()
+}
