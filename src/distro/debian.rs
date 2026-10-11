@@ -151,9 +151,9 @@ impl Distro for Debian {
     /// Stage the kernel where bootc looks for it. The kernel package installs
     /// it under /boot.
     ///
-    /// On arm64 the kernel package installs a gzip-compressed EFI image, which
-    /// systemd-stub cannot boot from a UKI. It is staged decompressed, which
-    /// keeps the signature of the EFI image inside.
+    /// NOTE: Ubuntu 24.04's arm64 kernel packages install a gzip-compressed EFI
+    /// image, which systemd-stub cannot boot from a UKI. It is staged
+    /// decompressed, which keeps the signature of the EFI image inside.
     fn stage_kernel(&self, root: &Dir, kver: &str) -> Result<()> {
         let staged = format!("usr/lib/modules/{kver}/vmlinuz");
         let installed = format!("boot/vmlinuz-{kver}");
