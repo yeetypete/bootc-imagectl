@@ -84,10 +84,15 @@ impl fmt::Display for Entry<'_> {
     }
 }
 
-/// The path field of a tmpfiles.d line, or `None` for a comment or blank line.
-pub(super) fn entry_path(line: &str) -> Option<&str> {
+/// The path a tmpfiles.d line creates, if any.
+pub(super) fn created_path(line: &str) -> Option<&str> {
     let mut fields = line.split_whitespace();
-    if fields.next()?.starts_with('#') {
+    let kind = fields.next()?.chars().next()?;
+    // The types that create a missing path.
+    if !matches!(
+        kind,
+        'f' | 'F' | 'd' | 'D' | 'v' | 'q' | 'Q' | 'p' | 'L' | 'c' | 'b' | 'C'
+    ) {
         return None;
     }
     fields.next()
@@ -116,11 +121,11 @@ pub(super) fn cat_config() -> Result<String> {
         .output_string()
 }
 
-/// Every path the tmpfiles.d `config` declares.
+/// Every path the tmpfiles.d `config` creates.
 pub(super) fn declared_paths(config: &str) -> HashSet<String> {
     config
         .lines()
-        .filter_map(entry_path)
+        .filter_map(created_path)
         .map(expand_specifier)
         .collect()
 }
@@ -244,26 +249,57 @@ mod tests {
             d /var/log 0755 - - -
             d %S/containers 0755 root root -
             L /var/lock - - - - ../run/lock
+            L+ /var/run - - - - ../run
+            d- /var/roothome 0700 root root -
+            f^ /var/lib/key 0600 root root - credential
+            C! /var/lib/factory - - - -
+
+            # Only adjust /var/log/journal, as systemd.conf does
+            h /var/log/journal - - - - +C
+            z /var/log/journal 2755 root systemd-journal - -
+            a+ /var/log/journal - - - - d:group::r-x
+            w /var/lib/written - - - - text
+            e /var/lib/existing 0755 - - 10d
+            x /var/lib/excluded
+            r! /var/lib/removed
+            Z /var/lib/recursive 0755 - - -
         "});
         assert_eq!(
             declared,
-            ["/var/log", "/var/lib/containers", "/var/lock"]
-                .map(String::from)
-                .into_iter()
-                .collect()
+            [
+                "/var/log",
+                "/var/lib/containers",
+                "/var/lock",
+                "/var/run",
+                "/var/roothome",
+                "/var/lib/key",
+                "/var/lib/factory",
+            ]
+            .map(String::from)
+            .into_iter()
+            .collect()
         );
     }
 
     #[test]
-    fn extracts_entry_paths() {
-        assert_eq!(entry_path("d /var/log 0755 - - -"), Some("/var/log"));
+    fn extracts_created_paths() {
+        assert_eq!(created_path("d /var/log 0755 - - -"), Some("/var/log"));
         assert_eq!(
-            entry_path("  L /var/lock - - - - ../run/lock"),
+            created_path("  L /var/lock - - - - ../run/lock"),
             Some("/var/lock")
         );
-        assert_eq!(entry_path("# d /commented 0755 - - -"), None);
-        assert_eq!(entry_path(""), None);
-        assert_eq!(entry_path("d"), None);
+        assert_eq!(created_path("L?$ /var/lock - - - -"), Some("/var/lock"));
+        assert_eq!(
+            created_path("f+~ /var/file - - - - eA=="),
+            Some("/var/file")
+        );
+        assert_eq!(created_path("F /var/file - - - -"), Some("/var/file"));
+        assert_eq!(created_path("z /var/log/journal 2755 - - -"), None);
+        assert_eq!(created_path("m /var/log/journal 2755 - - -"), None);
+        assert_eq!(created_path("w+ /var/file - - - - text"), None);
+        assert_eq!(created_path("# d /commented 0755 - - -"), None);
+        assert_eq!(created_path(""), None);
+        assert_eq!(created_path("d"), None);
     }
 
     #[test]
