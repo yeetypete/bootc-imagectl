@@ -1,5 +1,9 @@
-//! Make the user that systemd-homed's first boot wizard creates an
-//! administrator.
+//! Configure systemd-homed's storage and first boot wizard.
+//!
+//! homed cannot see through the /home symlink that the root is encrypted,
+//! and would encrypt homes again. finalize sets subvolume storage instead,
+//! which falls back to a directory on filesystems other than btrfs. See
+//! <https://github.com/yeetypete/bootc-imagectl/issues/64>.
 //!
 //! `systemd-homed-firstboot.service` creates the first regular user without
 //! the groups the distributions' installers assign it. finalize only changes
@@ -15,6 +19,13 @@ use crate::distro::Distro;
 use crate::passwd::{Entry, Group, Names};
 use crate::sysusers::Name;
 
+/// systemd-homed's unit.
+const HOMED: &str = "systemd-homed.service";
+
+/// The homed.conf drop-in finalize writes, relative to the rootfs.
+const CONFIG_DIR: &str = "usr/lib/systemd/homed.conf.d";
+const CONFIG: &str = "50-bootc-imagectl.conf";
+
 /// The wizard's unit.
 const UNIT: &str = "systemd-homed-firstboot.service";
 
@@ -22,14 +33,20 @@ const UNIT: &str = "systemd-homed-firstboot.service";
 const DROPIN_DIR: &str = "usr/lib/systemd/system/systemd-homed-firstboot.service.d";
 const DROPIN: &str = "50-bootc-imagectl.conf";
 
-/// Add the wizard's user to the admin group and the default user groups.
+/// Set homed's default storage, and add the wizard's user to the admin
+/// group and the default user groups.
 ///
 /// # Errors
 ///
 /// Fails if the image lacks the admin group or the wizard's command cannot
 /// be extended.
 pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
-    if !units::is_enabled(root, &units::unit_files()?, UNIT)? {
+    let unit_files = units::unit_files()?;
+    if !unit_files.iter().any(|unit| unit.name == HOMED) {
+        return Ok(());
+    }
+    write_config(root)?;
+    if !units::is_enabled(root, &unit_files, UNIT)? {
         return Ok(());
     }
     configure(
@@ -45,6 +62,17 @@ fn configure(root: &Dir, distro: &dyn Distro, config: &str) -> Result<()> {
     let command = exec_start(config).with_context(|| format!("reading the command of {UNIT}"))?;
     write_dropin(root, command, &groups)?;
     info!("{UNIT} adds the user it creates to {}", Names(&groups));
+    Ok(())
+}
+
+/// Write the drop-in setting homed's default storage. A later drop-in
+/// may override it, e.g. for images installed without encryption.
+fn write_config(root: &Dir) -> Result<()> {
+    root.create_dir_all(CONFIG_DIR)
+        .with_context(|| format!("creating /{CONFIG_DIR}"))?;
+    let path = format!("{CONFIG_DIR}/{CONFIG}");
+    root.write(&path, "[Home]\nDefaultStorage=subvolume\n")
+        .with_context(|| format!("writing /{path}"))?;
     Ok(())
 }
 
@@ -174,6 +202,17 @@ mod tests {
         let root = image("")?;
         let err = format!("{:#}", configure(&root, &DISTRO, VENDOR).unwrap_err());
         assert!(err.contains("no wheel group"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn stores_homes_unencrypted() -> Result<()> {
+        let root = rootfs()?;
+        write_config(&root)?;
+        assert_eq!(
+            root.read_to_string(format!("{CONFIG_DIR}/{CONFIG}"))?,
+            "[Home]\nDefaultStorage=subvolume\n"
+        );
         Ok(())
     }
 

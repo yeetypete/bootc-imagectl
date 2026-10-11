@@ -15,3 +15,8 @@ fn adds_wizard_user_to_groups() -> Result<()> {
         "sudo", "audio", "cdrom", "dip", "floppy", "video", "plugdev", "lpadmin",
     ])
 }
+
+#[test]
+fn stores_wizard_user_unencrypted() -> Result<()> {
+    homed::stores_wizard_user_unencrypted()
+}
