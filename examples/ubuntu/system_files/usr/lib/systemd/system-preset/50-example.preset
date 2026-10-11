@@ -1,0 +1,3 @@
+# NetworkManager manages the network, as on Ubuntu's desktop installs.
+disable systemd-networkd*
+disable systemd-network-generator.service
