@@ -92,14 +92,13 @@ FROM image AS finalized
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
 {% if secureboot %}
 # finalize signs systemd-boot and stages the certificate for enrollment.
-# The certificate is bind-mounted so a new key invalidates the cache. The
-# key goes in /run, since bootc's lint flags podman's /run/secrets.
-RUN --mount=type=secret,id=secureboot_key,target=/run/secureboot.key \
+# The certificate is bind-mounted so a new key invalidates the cache.
+RUN --mount=type=secret,id=secureboot_key \
     --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
     /usr/libexec/bootc-imagectl finalize \
       --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf \
       --read-only-accounts \
-      --secureboot-private-key /run/secureboot.key \
+      --secureboot-private-key /run/secrets/secureboot_key \
       --secureboot-certificate /run/secureboot.crt
 {% else %}
 RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts{% if transient_etc %} --transient-etc{% endif %}
@@ -128,7 +127,7 @@ FROM chunked AS uki
 RUN --mount=type=bind,from=chunked,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
 {% if secureboot %}
-    --mount=type=secret,id=secureboot_key,target=/run/secureboot.key \
+    --mount=type=secret,id=secureboot_key \
     --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
 {% endif %}
     kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
@@ -137,7 +136,7 @@ RUN --mount=type=bind,from=chunked,target=/target \
       -- \
 {% if secureboot %}
       --signtool systemd-sbsign --no-sign-kernel \
-      --secureboot-private-key /run/secureboot.key \
+      --secureboot-private-key /run/secrets/secureboot_key \
       --secureboot-certificate /run/secureboot.crt \
 {% endif %}
       --output "/uki/${kver}.efi"

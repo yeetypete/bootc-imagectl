@@ -111,10 +111,21 @@ CMD ["/sbin/init"]
 
 FROM image AS finalized
 
-# The directory holding bootc-imagectl is passed as the bootc-imagectl build
-# context, see the build steps above the uki stage.
+# The directory holding bootc-imagectl and one holding the Secure Boot
+# certificate are passed as the bootc-imagectl and secureboot build contexts,
+# the key as the secureboot_key secret, see the build steps above the uki stage.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-RUN --network=none /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts --chunkah-xattrs
+# finalize signs systemd-boot and stages the certificate for enrollment.
+# The certificate is bind-mounted so a new key invalidates the cache.
+RUN --network=none \
+    --mount=type=secret,id=secureboot_key \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
+    /usr/libexec/bootc-imagectl finalize \
+      --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf \
+      --read-only-accounts \
+      --chunkah-xattrs \
+      --secureboot-private-key /run/secrets/secureboot_key \
+      --secureboot-certificate /run/secureboot.crt
 
 
 # The UKI embeds the kernel and initramfs.
@@ -130,24 +141,35 @@ RUN bootc container lint --fatal-warnings
 # context:
 #
 #     podman build --build-context bootc-imagectl=target/release \
+#       --build-context secureboot=keys \
+#       --secret id=secureboot_key,src=keys/secureboot.key \
 #       --target rootfs --tag localhost/rootfs .
 #     podman run --rm --mount type=image,src=localhost/rootfs,dst=/chunkah \
 #       --env CHUNKAH_CONFIG_STR="$(podman image inspect localhost/rootfs)" \
 #       quay.io/coreos/chunkah build --max-layers 128 --source-date-epoch 0 \
 #       --tag localhost/chunked | podman load
 #     podman build --build-context bootc-imagectl=target/release \
+#       --build-context secureboot=keys \
+#       --secret id=secureboot_key,src=keys/secureboot.key \
 #       --build-context chunked=container-image://localhost/chunked .
 #
 # Seal the UKI from chunked so that its composefs digest covers the mtimes
 # chunkah rewrites.
 FROM chunked AS uki
 
+# The UKI is signed with the same key as systemd-boot.
 RUN --mount=type=bind,from=chunked,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
+    --mount=type=secret,id=secureboot_key \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
     kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
     mkdir /uki && \
     bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
-      -- --output "/uki/${kver}.efi"
+      -- \
+      --signtool systemd-sbsign --no-sign-kernel \
+      --secureboot-private-key /run/secrets/secureboot_key \
+      --secureboot-certificate /run/secureboot.crt \
+      --output "/uki/${kver}.efi"
 
 
 FROM chunked

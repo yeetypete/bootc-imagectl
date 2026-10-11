@@ -30,6 +30,9 @@ const NO_SECURE_BOOT_IMAGES: &[&str] = &["ubuntu-24.04"];
 /// The examples with a transient /etc.
 const TRANSIENT_ETC_EXAMPLES: &[&str] = &["ubuntu-transient-etc"];
 
+/// The examples signed for Secure Boot.
+const SECURE_BOOT_EXAMPLES: &[&str] = &["ubuntu-desktop"];
+
 /// A variant of every test image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Variant {
@@ -82,7 +85,7 @@ impl Variant {
 pub(crate) enum Source {
     /// A test image in tests/images, built once per variant.
     Test,
-    /// An example in examples/, built as is.
+    /// An example in examples/.
     Example,
 }
 
@@ -157,7 +160,10 @@ impl Image {
 
     /// Whether the image is signed for Secure Boot.
     pub(crate) fn has_secure_boot(&self) -> bool {
-        self.variant.has_secure_boot()
+        match self.source {
+            Source::Test => self.variant.has_secure_boot(),
+            Source::Example => SECURE_BOOT_EXAMPLES.contains(&self.name.as_str()),
+        }
     }
 
     /// The environment that tells the test binary it runs against this image,

@@ -132,10 +132,12 @@ pub(crate) fn install_disk(
 
 /// Boot the installed disk in a VM with a graphical console, and wait for
 /// it to power off. The boot will prompt for the disk's passphrase.
-pub(crate) fn boot_gui(disk: &Path) -> Result<()> {
+pub(crate) fn boot_gui(sh: &Shell, disk: &Path, secure_boot: bool) -> Result<()> {
+    let firmware = firmware(sh, secure_boot)?;
     // Registered before systemd-vmspawn starts, so no Ctrl-C is lost.
     let mut signals = Signals::new([SIGINT, SIGTERM])?;
     let mut vmspawn = vmspawn(disk)
+        .arg(firmware)
         .arg("--console=gui")
         .stdin(Stdio::null())
         // Ctrl-C in the terminal would also reach QEMU, which would quit
@@ -186,6 +188,16 @@ fn vmspawn_error(e: io::Error) -> anyhow::Error {
         io::ErrorKind::NotFound => anyhow::anyhow!("systemd-vmspawn is not installed"),
         _ => anyhow::Error::from(e).context("starting systemd-vmspawn"),
     }
+}
+
+/// The systemd-vmspawn firmware option. A signed image enrolls its keys and
+/// boots with Secure Boot on.
+fn firmware(sh: &Shell, secure_boot: bool) -> Result<String> {
+    Ok(if secure_boot {
+        format!("--firmware={}", setup_mode_firmware(sh)?.display())
+    } else {
+        "--secure-boot=no".into()
+    })
 }
 
 /// A firmware descriptor systemd-vmspawn finds for Secure Boot in setup
@@ -326,12 +338,7 @@ impl Vm {
         fs::create_dir(&runtime_dir)?;
 
         let journal = work.join("vm.journal");
-        // A signed image enrolls its keys and boots with Secure Boot on.
-        let firmware = if secure_boot {
-            format!("--firmware={}", setup_mode_firmware(sh)?.display())
-        } else {
-            "--secure-boot=no".into()
-        };
+        let firmware = firmware(sh, secure_boot)?;
         let cid = random_cid();
         let vmspawn = vmspawn(disk)
             .env("RUNTIME_DIRECTORY", &runtime_dir)
