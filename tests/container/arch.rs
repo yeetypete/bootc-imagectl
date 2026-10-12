@@ -19,12 +19,6 @@ fn moves_pacman_database_and_removes_its_indexes() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn keeps_catchall_of_presets() {
-    // Arch's presets end in `disable *`, so finalize adds no catchall.
-    assert!(!ROOT.exists("usr/lib/systemd/system-preset/99-bootc-imagectl-default.preset"));
-}
-
 /// The image's package users and its regular user.
 const ARCH: MovedAccounts = MovedAccounts {
     system_users: &[("avahi", 969), ("uuidd", 970)],

@@ -28,12 +28,6 @@ fn keeps_rpm_database_under_usr() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn keeps_catchall_of_presets() {
-    // Fedora's presets end in `disable *`, so finalize adds no catchall.
-    assert!(!ROOT.exists("usr/lib/systemd/system-preset/99-bootc-imagectl-default.preset"));
-}
-
 /// The image's package users and its regular user.
 const FEDORA: MovedAccounts = MovedAccounts {
     system_users: &[("systemd-coredump", 997), ("systemd-oom", 998)],

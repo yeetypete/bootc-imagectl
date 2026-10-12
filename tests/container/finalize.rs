@@ -138,6 +138,16 @@ fn records_enabled_units_in_presets() -> Result<()> {
 }
 
 #[test]
+fn ends_presets_with_catchall() -> Result<()> {
+    // Without a catchall, the first boot would enable every unit.
+    let presets = Command::new("systemd-analyze")
+        .args(["--root=/", "--tldr", "cat-config", "systemd/system-preset"])
+        .output_string()?;
+    assert!(presets.lines().any(|line| line == "disable *"), "{presets}");
+    Ok(())
+}
+
+#[test]
 fn applies_preset_policy() -> Result<()> {
     // The first boot applies the policy again, so it must find nothing to
     // enable.
