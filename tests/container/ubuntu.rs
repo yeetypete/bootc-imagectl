@@ -41,15 +41,6 @@ fn removes_snakeoil_certificate() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn adds_catchall_to_presets() -> Result<()> {
-    // Ubuntu's presets have no catchall, so they would enable every unit.
-    let presets =
-        ROOT.read_to_string("usr/lib/systemd/system-preset/99-bootc-imagectl-default.preset")?;
-    assert!(presets.lines().any(|line| line == "disable *"), "{presets}");
-    Ok(())
-}
-
 /// The image's package users and its regular user.
 const UBUNTU: MovedAccounts = MovedAccounts {
     system_users: &[("sshd", 992), ("systemd-network", 998)],

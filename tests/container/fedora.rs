@@ -28,20 +28,6 @@ fn keeps_rpm_database_under_usr() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn records_enabled_units_in_presets() -> Result<()> {
-    let presets = ROOT.read_to_string("usr/lib/systemd/system-preset/10-bootc-imagectl.preset")?;
-    assert!(
-        presets
-            .lines()
-            .any(|line| line == "enable systemd-timesyncd.service"),
-        "{presets}"
-    );
-    assert!(!presets.contains("disable"), "{presets}");
-    assert!(!ROOT.exists("usr/lib/systemd/system-preset/99-bootc-imagectl-default.preset"));
-    Ok(())
-}
-
 /// The image's package users and its regular user.
 const FEDORA: MovedAccounts = MovedAccounts {
     system_users: &[("systemd-coredump", 997), ("systemd-oom", 998)],

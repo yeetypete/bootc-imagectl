@@ -125,6 +125,29 @@ pub(crate) fn preset_changes(mode: &str) -> Result<Vec<String>> {
 }
 
 #[test]
+fn records_enabled_units_in_presets() -> Result<()> {
+    let presets = ROOT.read_to_string("usr/lib/systemd/system-preset/10-bootc-imagectl.preset")?;
+    assert!(
+        presets
+            .lines()
+            .any(|line| line == "enable systemd-boot-check-no-failures.service"),
+        "{presets}"
+    );
+    assert!(!presets.contains("disable"), "{presets}");
+    Ok(())
+}
+
+#[test]
+fn ends_presets_with_catchall() -> Result<()> {
+    // Without a catchall, the first boot would enable every unit.
+    let presets = Command::new("systemd-analyze")
+        .args(["--root=/", "--tldr", "cat-config", "systemd/system-preset"])
+        .output_string()?;
+    assert!(presets.lines().any(|line| line == "disable *"), "{presets}");
+    Ok(())
+}
+
+#[test]
 fn applies_preset_policy() -> Result<()> {
     // The first boot applies the policy again, so it must find nothing to
     // enable.
