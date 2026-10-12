@@ -66,12 +66,9 @@ RUN echo 'archie:archie' | chpasswd && usermod -aG wheel archie
 
 COPY --from=bootc-builder /out/usr/ /usr/
 
-# Bootc links against the installed libostree.
-RUN ldconfig
-
 COPY --from=system-files /system_files/ /
 
-RUN systemctl enable systemd-networkd.service sshd.service remote-fs.target
+RUN systemctl enable systemd-networkd.service sshd.service
 {% if homed %}
 RUN systemctl enable systemd-homed-firstboot.service
 {% endif %}

@@ -51,7 +51,7 @@ COPY --from=system-files /system_files/ /
 
 # Enable systemd-timesyncd, which Fedora's presets disable, to test that it
 # stays enabled after the first boot.
-RUN systemctl enable sshd.service systemd-timesyncd.service
+RUN systemctl enable systemd-timesyncd.service
 {% if homed %}
 RUN systemctl enable systemd-homed-firstboot.service
 {% endif %}

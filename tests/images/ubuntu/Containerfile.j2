@@ -77,9 +77,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     systemd-ukify \
     zstd
 
-# Bootc links against the installed libostree.
 COPY --from=bootc-builder /out/usr/ /usr/
-RUN ldconfig
 
 {% if homed %}
 RUN userdel --remove ubuntu
@@ -90,7 +88,6 @@ RUN echo 'ubuntu:ubuntu' | chpasswd
 
 COPY --from=system-files /system_files/ /
 
-RUN systemctl enable systemd-networkd.service ssh.service
 {% if homed %}
 RUN systemctl enable systemd-homed-firstboot.service
 {% endif %}

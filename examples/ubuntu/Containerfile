@@ -89,15 +89,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     policykit-desktop-privileges \
     ptyxis \
     ubuntu-desktop-minimal \
-    ubuntu-wallpapers \
-    xdg-desktop-portal-gnome \
-    yaru-theme-gnome-shell \
     yaru-theme-gtk \
     yaru-theme-icon
 
-# Bootc links against the installed libostree.
 COPY --from=bootc-builder /out/usr/ /usr/
-RUN ldconfig
 
 # systemd-homed's first boot wizard creates the first user.
 RUN userdel --remove ubuntu
