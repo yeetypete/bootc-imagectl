@@ -123,11 +123,10 @@ FROM rootfs AS uki
 # The kernel and initramfs come from finalized, the systemd-stub from rootfs.
 RUN --mount=type=bind,from=rootfs,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
-    kver="$(ls /kernel)" && \
+    kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
     mkdir /uki && \
     bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
-      -- --stub /target/usr/lib/systemd/boot/efi/linuxx64.efi.stub \
-      --output "/uki/${kver}.efi"
+      -- --output "/uki/${kver}.efi"
 
 
 FROM rootfs

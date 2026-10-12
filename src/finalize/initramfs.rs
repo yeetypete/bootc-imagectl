@@ -22,21 +22,35 @@ const DRACUT_CONF_DIR: &str = "usr/lib/dracut/dracut.conf.d";
 /// The dracut configuration for every initramfs built in the image.
 const DRACUT_CONF: &str = "usr/lib/dracut/dracut.conf.d/10-bootc-imagectl.conf";
 
-/// The kernel the image ships. bootc requires exactly one.
-fn kernel_version(root: &Dir) -> Result<String> {
-    let mut kvers = Vec::new();
+/// The directories under /usr/lib/modules.
+fn module_dirs(root: &Dir) -> Result<Vec<String>> {
+    let mut names = Vec::new();
     if let Some(modules) = root.open_dir_optional(MODULES)? {
         for entry in modules.entries()? {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
-                kvers.push(entry.file_name()?);
+                names.push(entry.file_name()?);
             }
+        }
+    }
+    Ok(names)
+}
+
+/// The kernel the image ships. bootc requires exactly one located at
+/// /usr/lib/modules/<kver>/vmlinuz.
+fn kernel_version(root: &Dir) -> Result<String> {
+    let mut kvers = Vec::new();
+    for name in module_dirs(root)? {
+        if root.is_file(format!("{MODULES}/{name}/vmlinuz")) {
+            kvers.push(name);
+        } else {
+            debug!("skipping /{MODULES}/{name}, which has no vmlinuz");
         }
     }
     kvers.sort();
     match kvers.as_slice() {
         [kver] => Ok(kver.clone()),
-        [] => bail!("no kernel under /{MODULES}"),
+        [] => bail!("no kernel image under /{MODULES}"),
         _ => bail!(
             "expected exactly one kernel under /{MODULES}, found {}",
             kvers.join(" ")
@@ -71,15 +85,14 @@ install_items+=" /etc/nsswitch.conf {records} "
 
 /// Stage the kernel and build the initramfs.
 pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
+    for name in module_dirs(root)? {
+        distro
+            .stage_kernel(root, &name)
+            .with_context(|| format!("staging the kernel {name}"))?;
+    }
     let kver = kernel_version(root)?;
     debug!("building the initramfs for {kver}");
     let moddir = format!("{MODULES}/{kver}");
-    distro
-        .stage_kernel(root, &kver)
-        .context("staging the kernel")?;
-    if !root.is_file(format!("{moddir}/vmlinuz")) {
-        bail!("no kernel image at /{moddir}/vmlinuz");
-    }
     let initramfs = format!("{moddir}/initramfs.img");
 
     write_dracut_conf(root)?;
@@ -98,11 +111,19 @@ mod tests {
     use super::*;
     use crate::testutil::rootfs;
 
+    /// A kernel's module directory with its kernel image staged.
+    fn install_kernel(root: &Dir, kver: &str) -> Result<()> {
+        root.create_dir_all(format!("{MODULES}/{kver}"))?;
+        root.write(format!("{MODULES}/{kver}/vmlinuz"), b"kernel")?;
+        Ok(())
+    }
+
     #[test]
     fn finds_kernel() -> Result<()> {
         let root = rootfs()?;
-        root.create_dir_all(format!("{MODULES}/7.1.11-arch1-1"))?;
+        install_kernel(&root, "7.1.11-arch1-1")?;
         root.write(format!("{MODULES}/stray-file"), b"not a kernel")?;
+        root.create_dir_all(format!("{MODULES}/kernel/extra"))?;
         assert_eq!(kernel_version(&root)?, "7.1.11-arch1-1");
         Ok(())
     }
@@ -126,8 +147,8 @@ mod tests {
     fn rejects_missing_or_multiple_kernels() -> Result<()> {
         let root = rootfs()?;
         assert!(kernel_version(&root).is_err());
-        root.create_dir_all(format!("{MODULES}/7.1.11-arch1-1"))?;
-        root.create_dir_all(format!("{MODULES}/7.1.12-arch1-1"))?;
+        install_kernel(&root, "7.1.11-arch1-1")?;
+        install_kernel(&root, "7.1.12-arch1-1")?;
         let err = kernel_version(&root).unwrap_err().to_string();
         assert!(err.contains("7.1.11-arch1-1 7.1.12-arch1-1"), "{err}");
         Ok(())
