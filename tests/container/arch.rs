@@ -20,21 +20,9 @@ fn moves_pacman_database_and_removes_its_indexes() -> Result<()> {
 }
 
 #[test]
-fn records_enabled_units_in_presets() -> Result<()> {
-    let presets = ROOT.read_to_string("usr/lib/systemd/system-preset/10-bootc-imagectl.preset")?;
-    assert!(
-        presets.lines().any(|line| line == "enable sshd.service"),
-        "{presets}"
-    );
-    assert!(
-        presets
-            .lines()
-            .any(|line| line == "enable systemd-networkd.socket"),
-        "{presets}"
-    );
-    assert!(!presets.contains("disable"), "{presets}");
+fn keeps_catchall_of_presets() {
+    // Arch's presets end in `disable *`, so finalize adds no catchall.
     assert!(!ROOT.exists("usr/lib/systemd/system-preset/99-bootc-imagectl-default.preset"));
-    Ok(())
 }
 
 /// The image's package users and its regular user.

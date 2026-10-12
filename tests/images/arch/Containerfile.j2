@@ -68,7 +68,11 @@ COPY --from=bootc-builder /out/usr/ /usr/
 
 COPY --from=system-files /system_files/ /
 
-RUN systemctl enable systemd-networkd.service sshd.service
+# The tests connect over SSH, which Arch's presets disable.
+RUN systemctl enable sshd.service
+# Test: the distro's presets disable this unit, so it stays enabled only if
+# finalize records it.
+RUN systemctl enable systemd-boot-check-no-failures.service
 {% if homed %}
 RUN systemctl enable systemd-homed-firstboot.service
 {% endif %}
