@@ -114,7 +114,7 @@ FROM image AS finalized
 #
 #     podman build --build-context bootc-imagectl=target/release .
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-RUN --network=none /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
+RUN --network=none /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts
 
 
 # The UKI embeds the kernel and initramfs.
