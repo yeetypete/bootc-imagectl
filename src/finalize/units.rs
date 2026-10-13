@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::command::CommandRunExt;
 
 /// Where packages install system units, relative to the rootfs.
-const VENDOR_UNIT_DIR: &str = "usr/lib/systemd/system";
+pub(super) const VENDOR_UNIT_DIR: &str = "usr/lib/systemd/system";
 
 /// A unit file's enablement state, as in systemctl(1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
