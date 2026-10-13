@@ -26,7 +26,8 @@ pub(crate) fn locks_uids(accounts: &MovedAccounts) {
 
 /// The user of a removed package keeps its UID and the GID of its group,
 /// locked.
-pub(crate) fn keeps_removed_accounts_locked() -> Result<()> {
+#[test]
+fn keeps_removed_accounts_locked() -> Result<()> {
     let user = uzers::get_user_by_name("removed").expect("the user resolves through NSS");
     assert_eq!(user.uid(), 850);
     let group = uzers::get_group_by_gid(850).expect("the group resolves through NSS");

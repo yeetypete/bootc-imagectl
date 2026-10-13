@@ -14,6 +14,7 @@ use tracing::info;
 use crate::cli::FinalizeOpts;
 use crate::distro;
 
+mod account_files;
 mod accounts;
 mod homed;
 mod identity;
@@ -44,6 +45,9 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     presets::finalize(&root).context("applying the preset policy")?;
     homed::finalize(&root, distro).context("configuring systemd-homed")?;
     accounts::finalize(&root, distro, &opts.sysusers_lock).context("finalizing the accounts")?;
+    if opts.read_only_accounts {
+        account_files::finalize(&root).context("mounting the account files read-only")?;
+    }
     initramfs::finalize(&root, distro).context("building the initramfs")?;
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;

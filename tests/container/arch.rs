@@ -32,11 +32,6 @@ fn locks_uids_of_package_users() {
 }
 
 #[test]
-fn keeps_removed_accounts_locked() -> Result<()> {
-    accounts::keeps_removed_accounts_locked()
-}
-
-#[test]
 fn moves_accounts_out_of_etc_and_resolves_them_through_nss() -> Result<()> {
     accounts::moves_accounts_out_of_etc(&ARCH)
 }

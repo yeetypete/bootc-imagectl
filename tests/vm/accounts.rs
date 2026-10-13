@@ -8,6 +8,7 @@ use bootc_imagectl::command::CommandRunExt;
 use bootc_imagectl::testing;
 use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs_utf8::Dir;
+use rustix::fs::{StatVfsMountFlags, statvfs};
 
 use crate::boot_time;
 
@@ -72,7 +73,8 @@ pub(crate) fn accepts_password(user: &MovedUser) -> Result<()> {
 
 /// The first boot, including systemd-sysusers, left the account files in
 /// /etc unchanged.
-pub(crate) fn account_files_unchanged() -> Result<()> {
+#[test]
+fn keeps_account_files_unchanged_after_first_boot() -> Result<()> {
     let result = Command::new("systemctl")
         .args(["show", "-P", "Result", "systemd-sysusers.service"])
         .output_string()?;
@@ -90,4 +92,20 @@ pub(crate) fn account_files_unchanged() -> Result<()> {
 
     let root = Dir::open_ambient_dir("/", ambient_authority())?;
     testing::etc_contains_only_root_and_nobody(&root)
+}
+
+/// The account files are mounted read-only within a writable /etc, so adding
+/// a group fails.
+#[test]
+fn mounts_account_files_read_only() -> Result<()> {
+    assert!(!statvfs("/etc")?.f_flag.contains(StatVfsMountFlags::RDONLY));
+    for file in ["/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow"] {
+        let flags = statvfs(file)?.f_flag;
+        assert!(flags.contains(StatVfsMountFlags::RDONLY), "{file}");
+    }
+    let added = Command::new("groupadd")
+        .arg("bootc-imagectl-test")
+        .status()?;
+    assert!(!added.success());
+    Ok(())
 }

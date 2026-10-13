@@ -85,7 +85,7 @@ FROM image AS finalized
 
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
+RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts
 
 
 # The UKI embeds the kernel and initramfs.

@@ -48,6 +48,11 @@ pub struct FinalizeOpts {
     /// your Containerfile.
     #[arg(long, value_name = "PATH")]
     pub sysusers_lock: Utf8PathBuf,
+
+    /// Mount /etc/passwd, /etc/shadow, /etc/group and /etc/gshadow read-only
+    /// at boot.
+    #[arg(long)]
+    pub read_only_accounts: bool,
 }
 
 /// Options for `install`.
