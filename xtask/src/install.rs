@@ -125,6 +125,7 @@ pub(crate) fn boot_gui(disk: &Path) -> Result<()> {
     let mut signals = Signals::new([SIGINT, SIGTERM])?;
     let mut vmspawn = vmspawn(disk)
         .arg("--console=gui")
+        .arg("--network-user-mode")
         .stdin(Stdio::null())
         // Ctrl-C in the terminal would also reach QEMU, which would quit
         // before systemd-vmspawn shuts the VM down.
