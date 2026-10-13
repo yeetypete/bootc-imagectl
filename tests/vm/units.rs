@@ -9,7 +9,8 @@ use crate::boot_time;
 
 /// The first boot, which applied the systemd presets, changed no symlink in
 /// /etc/systemd/system.
-pub(crate) fn unchanged_after_first_boot() -> Result<()> {
+#[test]
+fn keeps_units_unchanged_after_first_boot() -> Result<()> {
     // Enabling a unit creates a symlink and disabling one removes it. Either
     // updates the mtime of the symlink's directory.
     assert_written_before(Path::new("/etc/systemd/system"), boot_time())

@@ -73,7 +73,8 @@ pub(crate) fn accepts_password(user: &MovedUser) -> Result<()> {
 
 /// The first boot, including systemd-sysusers, left the account files in
 /// /etc unchanged.
-pub(crate) fn account_files_unchanged() -> Result<()> {
+#[test]
+fn keeps_account_files_unchanged_after_first_boot() -> Result<()> {
     let result = Command::new("systemctl")
         .args(["show", "-P", "Result", "systemd-sysusers.service"])
         .output_string()?;
