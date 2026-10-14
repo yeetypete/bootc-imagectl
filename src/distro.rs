@@ -1,10 +1,11 @@
 //! Distribution-specific behaviour.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
-use anyhow::{Context, Result, ensure};
-use cap_std_ext::camino::Utf8Path;
+use anyhow::{Context, Result, bail, ensure};
+use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::fs_utf8::Dir;
 
 mod arch;
@@ -117,7 +118,20 @@ pub trait Distro: std::fmt::Debug {
     ///
     /// Fails if the package manager cannot answer.
     fn is_installed(&self, name: &PackageName) -> Result<bool>;
+
+    /// The paths of the installed packages, grouped by chunkah component.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the distribution does not implement chunkah xattrs, or the
+    /// package database cannot be read.
+    fn package_components(&self, _root: &Dir) -> Result<Components> {
+        bail!("chunkah xattrs are not implemented for {}", self.name())
+    }
 }
+
+/// The paths of each component, see [`Distro::package_components`].
+pub type Components = BTreeMap<PackageName, Vec<Utf8PathBuf>>;
 
 /// The distribution an os-release `ID` or `ID_LIKE` entry names, if supported.
 fn from_id(id: &str) -> Option<&'static dyn Distro> {

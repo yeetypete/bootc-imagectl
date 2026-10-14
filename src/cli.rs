@@ -53,6 +53,11 @@ pub struct FinalizeOpts {
     /// at boot.
     #[arg(long)]
     pub read_only_accounts: bool,
+
+    /// Set each package file's user.component xattr, for package managers
+    /// chunkah does not support, e.g. dpkg.
+    #[arg(long)]
+    pub chunkah_xattrs: bool,
 }
 
 /// Options for `install`.
