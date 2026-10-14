@@ -19,6 +19,12 @@ mod vm;
 /// The repository the test images and examples are tagged under.
 const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 
+/// chunkah OCI image.
+const CHUNKAH: &str = "quay.io/coreos/chunkah:v0.7.0@sha256:8b56578258d1d10d3e1c7b0f71a4d05317c5fde331c4f483576a1b60e65f0cea";
+
+/// The max layers chunkah splits an image into.
+const CHUNKAH_MAX_LAYERS: u32 = 128;
+
 /// The environment variable setting `Build`.
 const BUILD_OPTIONS_ENV: &str = "BOOTC_IMAGECTL_BUILD_OPTIONS";
 
@@ -100,9 +106,16 @@ struct Selection {
 }
 
 impl Build {
-    /// Build the image `name` rendered into `dir` as `image`, with the
-    /// bootc-imagectl binary from `target`.
-    fn build(&self, sh: &Shell, name: &str, image: &str, dir: &Path, target: &Path) -> Result<()> {
+    /// Build the image `name` rendered into `dir` with the bootc-imagectl
+    /// binary from `target`, passing `args` to the builder.
+    fn build(
+        &self,
+        sh: &Shell,
+        name: &str,
+        dir: &Path,
+        target: &Path,
+        args: &[String],
+    ) -> Result<()> {
         let options: Vec<String> = self
             .options
             .iter()
@@ -111,7 +124,7 @@ impl Build {
             .collect();
         cmd!(
             sh,
-            "podman build {options...} --build-context bootc-imagectl={target} --tag {image} {dir}"
+            "podman build {options...} --build-context bootc-imagectl={target} {args...} {dir}"
         )
         .run()?;
         Ok(())
@@ -325,8 +338,36 @@ fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) 
     let dir = target.join("images").join(&tag);
     let reference = format!("{REPOSITORY}:{tag}");
     image.render(workspace_dir()?, &dir)?;
-    build.build(sh, &image.build_name(), &reference, &dir, target)?;
+    let name = image.build_name();
+    let mut args = Vec::new();
+    if image.chunked() {
+        let rootfs = format!("{reference}-rootfs");
+        let rootfs_args = ["--target=rootfs".into(), format!("--tag={rootfs}")];
+        build.build(sh, &name, &dir, target, &rootfs_args)?;
+        let chunked = rechunk(sh, &rootfs, &dir)?;
+        args.push(format!(
+            "--build-context=chunked=container-image://{chunked}"
+        ));
+    }
+    args.push(format!("--tag={reference}"));
+    build.build(sh, &name, &dir, target, &args)?;
     Ok(reference)
+}
+
+/// Rechunk the image `rootfs` with chunkah.
+fn rechunk(sh: &Shell, rootfs: &str, dir: &Path) -> Result<String> {
+    let config = cmd!(sh, "podman image inspect {rootfs}").read()?;
+    let mount = format!("type=image,src={rootfs},dst=/chunkah");
+    let volume = format!("{}:/srv:z", dir.display());
+    let max_layers = CHUNKAH_MAX_LAYERS.to_string();
+    cmd!(
+        sh,
+        "podman run --rm --mount={mount} --volume={volume} --env=CHUNKAH_CONFIG_STR {CHUNKAH} build --max-layers={max_layers} --output=oci:chunked"
+    )
+    .env("CHUNKAH_CONFIG_STR", config)
+    .run()?;
+    let layout = dir.join("chunked");
+    Ok(cmd!(sh, "podman pull --quiet oci:{layout}").read()?)
 }
 
 /// Build bootc-imagectl and return the target directory holding it.

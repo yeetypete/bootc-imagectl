@@ -76,13 +76,13 @@ RUN bootc container split-kernel-and-rootfs --output /kernel && \
 RUN bootc container lint --fatal-warnings
 
 
-# WORKAROUND: podman < 6.0 (buildah 1.44) leaves bind-mounted stages out of
-# cache keys. Building on rootfs keeps a cached UKI from being reused with a
-# different rootfs.
-FROM rootfs AS uki
+# The xtask passes rootfs rechunked by chunkah as the chunked build context.
+# Seal the UKI from chunked so that its composefs digest covers the mtimes
+# chunkah rewrites.
+FROM chunked AS uki
 
-# The kernel and initramfs come from finalized, the systemd-stub from rootfs.
-RUN --mount=type=bind,from=rootfs,target=/target \
+# The kernel and initramfs come from finalized, the systemd-stub from chunked.
+RUN --mount=type=bind,from=chunked,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
     kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
     mkdir /uki && \
@@ -90,6 +90,6 @@ RUN --mount=type=bind,from=rootfs,target=/target \
       -- --output "/uki/${kver}.efi"
 
 
-FROM rootfs
+FROM chunked
 
 COPY --from=uki /uki/ /boot/EFI/Linux/
