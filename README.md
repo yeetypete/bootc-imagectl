@@ -58,6 +58,10 @@ image enables enabled. To keep a unit disabled that a preset enables, add
 it if it must never run. Manual calls to `systemctl disable` would be undone when
 `finalize` applies the presets.
 
+[chunkah](https://github.com/coreos/chunkah) does not yet support dpkg
+([coreos/chunkah#155](https://github.com/coreos/chunkah/issues/155)). To rechunk
+a Debian or Ubuntu image with it, pass `--chunkah-xattrs` to `finalize`.
+
 End the build with `bootc container lint` to check the image.
 
 ## Installing
