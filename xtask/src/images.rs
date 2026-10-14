@@ -69,11 +69,6 @@ pub(crate) struct Image {
 }
 
 impl Image {
-    /// Whether the image is rechunked with chunkah.
-    pub(crate) fn chunked(&self) -> bool {
-        self.source == Source::Test
-    }
-
     /// The image's tag.
     pub(crate) fn tag(&self) -> String {
         match (self.source, self.variant) {

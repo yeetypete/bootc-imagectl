@@ -111,11 +111,10 @@ CMD ["/sbin/init"]
 
 FROM image AS finalized
 
-# The directory holding bootc-imagectl is passed as a build context:
-#
-#     podman build --build-context bootc-imagectl=target/release .
+# The directory holding bootc-imagectl is passed as the bootc-imagectl build
+# context, see the build steps above the uki stage.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-RUN --network=none /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts
+RUN --network=none /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts --chunkah-xattrs
 
 
 # The UKI embeds the kernel and initramfs.
@@ -127,13 +126,24 @@ RUN bootc container split-kernel-and-rootfs --output /kernel && \
 RUN bootc container lint --fatal-warnings
 
 
-# WORKAROUND: podman < 6.0 (buildah 1.44) leaves bind-mounted stages out of
-# cache keys. Building on rootfs keeps a cached UKI from being reused with a
-# different rootfs.
-FROM rootfs AS uki
+# The rootfs stage, rechunked by chunkah, is passed as the chunked build
+# context:
+#
+#     podman build --build-context bootc-imagectl=target/release \
+#       --target rootfs --tag localhost/rootfs .
+#     podman run --rm --mount type=image,src=localhost/rootfs,dst=/chunkah \
+#       --env CHUNKAH_CONFIG_STR="$(podman image inspect localhost/rootfs)" \
+#       quay.io/coreos/chunkah build --max-layers 128 --tag localhost/chunked \
+#       | podman load
+#     podman build --build-context bootc-imagectl=target/release \
+#       --build-context chunked=container-image://localhost/chunked .
+#
+# Seal the UKI from chunked so that its composefs digest covers the mtimes
+# chunkah rewrites.
+FROM chunked AS uki
 
-# The kernel and initramfs come from finalized, the systemd-stub from rootfs.
-RUN --mount=type=bind,from=rootfs,target=/target \
+# The kernel and initramfs come from finalized, the systemd-stub from chunked.
+RUN --mount=type=bind,from=chunked,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
     kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
     mkdir /uki && \
@@ -141,6 +151,6 @@ RUN --mount=type=bind,from=rootfs,target=/target \
       -- --output "/uki/${kver}.efi"
 
 
-FROM rootfs
+FROM chunked
 
 COPY --from=uki /uki/ /boot/EFI/Linux/

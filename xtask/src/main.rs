@@ -339,17 +339,14 @@ fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) 
     let reference = format!("{REPOSITORY}:{tag}");
     image.render(workspace_dir()?, &dir)?;
     let name = image.build_name();
-    let mut args = Vec::new();
-    if image.chunked() {
-        let rootfs = format!("{reference}-rootfs");
-        let rootfs_args = ["--target=rootfs".into(), format!("--tag={rootfs}")];
-        build.build(sh, &name, &dir, target, &rootfs_args)?;
-        let chunked = rechunk(sh, &rootfs, &dir)?;
-        args.push(format!(
-            "--build-context=chunked=container-image://{chunked}"
-        ));
-    }
-    args.push(format!("--tag={reference}"));
+    let rootfs = format!("{reference}-rootfs");
+    let rootfs_args = ["--target=rootfs".into(), format!("--tag={rootfs}")];
+    build.build(sh, &name, &dir, target, &rootfs_args)?;
+    let chunked = rechunk(sh, &rootfs, &dir)?;
+    let args = [
+        format!("--build-context=chunked=container-image://{chunked}"),
+        format!("--tag={reference}"),
+    ];
     build.build(sh, &name, &dir, target, &args)?;
     Ok(reference)
 }
