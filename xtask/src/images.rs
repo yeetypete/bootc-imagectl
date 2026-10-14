@@ -13,9 +13,6 @@ use minijinja::{Environment, UndefinedBehavior, Value, context};
 /// The extension of template files.
 const TEMPLATE_EXTENSION: &str = "j2";
 
-/// The test images rechunked with chunkah.
-const CHUNKED: [&str; 2] = ["arch", "fedora"];
-
 /// A variant of every test image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Variant {
@@ -72,10 +69,9 @@ pub(crate) struct Image {
 }
 
 impl Image {
-    /// Whether the image is rechunked with chunkah. chunkah does not yet
-    /// support dpkg. See <https://github.com/coreos/chunkah/issues/155>.
+    /// Whether the image is rechunked with chunkah.
     pub(crate) fn chunked(&self) -> bool {
-        self.source == Source::Test && CHUNKED.contains(&self.name.as_str())
+        self.source == Source::Test
     }
 
     /// The image's tag.
