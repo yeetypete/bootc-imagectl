@@ -142,7 +142,6 @@ RUN bootc container lint --fatal-warnings
 # chunkah rewrites.
 FROM chunked AS uki
 
-# The kernel and initramfs come from finalized, the systemd-stub from chunked.
 RUN --mount=type=bind,from=chunked,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
     kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \

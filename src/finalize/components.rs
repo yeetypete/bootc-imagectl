@@ -60,7 +60,6 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
         if file.symlink || path.ancestors().skip(1).any(|dir| dirs.contains_key(dir)) {
             continue;
         }
-        // A shared path gets no component.
         if let Owner::Component(component) = file.owner {
             set_component(root, path, component)?;
             set += 1;
