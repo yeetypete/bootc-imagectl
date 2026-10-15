@@ -20,10 +20,17 @@ mod vm;
 const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 
 /// chunkah OCI image.
-const CHUNKAH: &str = "quay.io/coreos/chunkah:v0.7.0@sha256:8b56578258d1d10d3e1c7b0f71a4d05317c5fde331c4f483576a1b60e65f0cea";
+///
+/// TODO: switch to v0.7.1 once published. v0.7.0 ignores
+/// `--source-date-epoch` for xattr components, see
+/// <https://github.com/coreos/chunkah/issues/176>.
+const CHUNKAH: &str = "quay.io/coreos/chunkah:dev@sha256:5538de8ec5563b27ec2f382b6ecdd91cc0ebcd500cf7111cf09ea408b6722384";
 
 /// The max layers chunkah splits an image into.
 const CHUNKAH_MAX_LAYERS: u32 = 128;
+
+/// The mtime chunkah clamps every file to.
+const CHUNKAH_SOURCE_DATE_EPOCH: u32 = 0;
 
 /// The environment variable setting `Build`.
 const BUILD_OPTIONS_ENV: &str = "BOOTC_IMAGECTL_BUILD_OPTIONS";
@@ -357,9 +364,10 @@ fn rechunk(sh: &Shell, rootfs: &str, dir: &Path) -> Result<String> {
     let mount = format!("type=image,src={rootfs},dst=/chunkah");
     let volume = format!("{}:/srv:z", dir.display());
     let max_layers = CHUNKAH_MAX_LAYERS.to_string();
+    let epoch = CHUNKAH_SOURCE_DATE_EPOCH.to_string();
     cmd!(
         sh,
-        "podman run --rm --mount={mount} --volume={volume} --env=CHUNKAH_CONFIG_STR {CHUNKAH} build --max-layers={max_layers} --output=oci:chunked"
+        "podman run --rm --mount={mount} --volume={volume} --env=CHUNKAH_CONFIG_STR {CHUNKAH} build --max-layers={max_layers} --source-date-epoch={epoch} --output=oci:chunked"
     )
     .env("CHUNKAH_CONFIG_STR", config)
     .run()?;
