@@ -20,10 +20,13 @@ mod vm;
 const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 
 /// chunkah OCI image.
-const CHUNKAH: &str = "quay.io/coreos/chunkah:v0.7.0@sha256:8b56578258d1d10d3e1c7b0f71a4d05317c5fde331c4f483576a1b60e65f0cea";
+const CHUNKAH: &str = "quay.io/coreos/chunkah:v0.7.1@sha256:71e593421c5de7dcc7c8c5c50e98d3bac572055a76f399f61a491d123c20a523";
 
 /// The max layers chunkah splits an image into.
 const CHUNKAH_MAX_LAYERS: u32 = 128;
+
+/// The mtime chunkah clamps every file to.
+const CHUNKAH_SOURCE_DATE_EPOCH: u32 = 0;
 
 /// The environment variable setting `Build`.
 const BUILD_OPTIONS_ENV: &str = "BOOTC_IMAGECTL_BUILD_OPTIONS";
@@ -339,17 +342,14 @@ fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) 
     let reference = format!("{REPOSITORY}:{tag}");
     image.render(workspace_dir()?, &dir)?;
     let name = image.build_name();
-    let mut args = Vec::new();
-    if image.chunked() {
-        let rootfs = format!("{reference}-rootfs");
-        let rootfs_args = ["--target=rootfs".into(), format!("--tag={rootfs}")];
-        build.build(sh, &name, &dir, target, &rootfs_args)?;
-        let chunked = rechunk(sh, &rootfs, &dir)?;
-        args.push(format!(
-            "--build-context=chunked=container-image://{chunked}"
-        ));
-    }
-    args.push(format!("--tag={reference}"));
+    let rootfs = format!("{reference}-rootfs");
+    let rootfs_args = ["--target=rootfs".into(), format!("--tag={rootfs}")];
+    build.build(sh, &name, &dir, target, &rootfs_args)?;
+    let chunked = rechunk(sh, &rootfs, &dir)?;
+    let args = [
+        format!("--build-context=chunked=container-image://{chunked}"),
+        format!("--tag={reference}"),
+    ];
     build.build(sh, &name, &dir, target, &args)?;
     Ok(reference)
 }
@@ -360,9 +360,10 @@ fn rechunk(sh: &Shell, rootfs: &str, dir: &Path) -> Result<String> {
     let mount = format!("type=image,src={rootfs},dst=/chunkah");
     let volume = format!("{}:/srv:z", dir.display());
     let max_layers = CHUNKAH_MAX_LAYERS.to_string();
+    let epoch = CHUNKAH_SOURCE_DATE_EPOCH.to_string();
     cmd!(
         sh,
-        "podman run --rm --mount={mount} --volume={volume} --env=CHUNKAH_CONFIG_STR {CHUNKAH} build --max-layers={max_layers} --output=oci:chunked"
+        "podman run --rm --mount={mount} --volume={volume} --env=CHUNKAH_CONFIG_STR {CHUNKAH} build --max-layers={max_layers} --source-date-epoch={epoch} --output=oci:chunked"
     )
     .env("CHUNKAH_CONFIG_STR", config)
     .run()?;

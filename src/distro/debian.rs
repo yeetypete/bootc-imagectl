@@ -6,13 +6,13 @@ use std::process::Command;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, bail, ensure};
-use cap_std_ext::camino::Utf8Path;
+use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use flate2::bufread::GzDecoder;
 use tracing::debug;
 
-use super::{Distro, PackageName, SYSIMAGE};
+use super::{Components, Distro, PackageName, SYSIMAGE};
 use crate::fs::move_dir;
 
 const DATABASE: &str = "var/lib/dpkg";
@@ -36,6 +36,10 @@ const STATE: [(&str, &str); 6] = [
 /// Directories apt refuses to run without, which finalize recreates in the
 /// emptied /var for package installs after finalize.
 const APT_DIRS: [&str; 1] = ["var/log/apt"];
+
+/// The `dpkg-query -W` format of each package and its source package, e.g.
+/// `libc6:amd64\tglibc`.
+const COMPONENT_FORMAT: &str = "-f=${binary:Package}\\t${source:Package}\\n";
 
 /// A package's state in the dpkg database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,6 +259,26 @@ impl Distro for Debian {
             .map(str::parse)
             .collect::<Result<Vec<PackageState>>>()?;
         Ok(states.iter().any(|state| state.is_installed()))
+    }
+
+    /// Group each package's files by its source package.
+    fn package_components(&self, root: &Dir) -> Result<Components> {
+        let output = query(&["-W", COMPONENT_FORMAT], "no packages found")?.unwrap_or_default();
+        let mut components = Components::new();
+        for line in output.lines() {
+            let (package, source) = line
+                .split_once('\t')
+                .with_context(|| format!("dpkg-query printed {line:?}"))?;
+            let list = format!("{DATABASE}/info/{package}.list");
+            let listed = root
+                .read_to_string(&list)
+                .with_context(|| format!("reading /{list}"))?;
+            components
+                .entry(source.parse()?)
+                .or_default()
+                .extend(listed.lines().map(Utf8PathBuf::from));
+        }
+        Ok(components)
     }
 }
 

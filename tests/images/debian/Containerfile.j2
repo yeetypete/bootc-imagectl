@@ -31,6 +31,7 @@ RUN git clone --depth 1 --branch "${BOOTC_VERSION}" https://github.com/bootc-dev
 
 RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
     --mount=type=cache,target=/bootc/target,sharing=locked \
+    CARGO_PROFILE_RELEASE_DEBUG=false CARGO_PROFILE_RELEASE_STRIP=true \
     make bin install DESTDIR=/out \
       CARGO_OPTIONS=--no-default-features
 
@@ -103,7 +104,7 @@ FROM image AS finalized
 
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts
+RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts --chunkah-xattrs
 
 
 # The UKI embeds the kernel and initramfs.
@@ -115,13 +116,12 @@ RUN bootc container split-kernel-and-rootfs --output /kernel && \
 RUN bootc container lint --fatal-warnings
 
 
-# WORKAROUND: podman < 6.0 (buildah 1.44) leaves bind-mounted stages out of
-# cache keys. Building on rootfs keeps a cached UKI from being reused with a
-# different rootfs.
-FROM rootfs AS uki
+# The xtask passes rootfs rechunked by chunkah as the chunked build context.
+# Seal the UKI from chunked so that its composefs digest covers the mtimes
+# chunkah rewrites.
+FROM chunked AS uki
 
-# The kernel and initramfs come from finalized, the systemd-stub from rootfs.
-RUN --mount=type=bind,from=rootfs,target=/target \
+RUN --mount=type=bind,from=chunked,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
     kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
     mkdir /uki && \
@@ -129,6 +129,6 @@ RUN --mount=type=bind,from=rootfs,target=/target \
       -- --output "/uki/${kver}.efi"
 
 
-FROM rootfs
+FROM chunked
 
 COPY --from=uki /uki/ /boot/EFI/Linux/

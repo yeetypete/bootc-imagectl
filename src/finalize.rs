@@ -16,6 +16,7 @@ use crate::distro;
 
 mod account_files;
 mod accounts;
+mod components;
 mod homed;
 mod identity;
 mod initramfs;
@@ -52,5 +53,8 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;
     kargs::finalize(&root).context("writing the kernel arguments")?;
+    if opts.chunkah_xattrs {
+        components::finalize(&root, distro).context("setting the package components")?;
+    }
     var::finalize(&root, distro).context("finalizing /var")
 }
