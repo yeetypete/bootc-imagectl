@@ -67,7 +67,7 @@ const LAYOUT: &[Entry<'static>] = &[
 ];
 
 /// bootc's setup-root configuration.
-const SETUP_ROOT_CONF: &str = "usr/lib/composefs/setup-root-conf.toml";
+pub(super) const SETUP_ROOT_CONF: &str = "usr/lib/composefs/setup-root-conf.toml";
 
 /// Lay out the toplevel directories and symlinks, and drop the tmpfiles.d
 /// entries that conflict with them.
