@@ -9,7 +9,7 @@ use crate::{homed, status};
 
 #[test]
 fn updates_from_target_imgref() -> Result<()> {
-    status::updates_from("localhost/bootc-imagectl-test:ubuntu-example")
+    status::updates_from("localhost/bootc-imagectl-test:ubuntu-desktop-example")
 }
 
 #[test]
