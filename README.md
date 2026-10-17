@@ -43,8 +43,9 @@ is built:
 
 ## Building an image
 
-See [`examples/ubuntu/Containerfile`](examples/ubuntu/Containerfile) for a
-complete example.
+See
+[`examples/ubuntu-desktop/Containerfile`](examples/ubuntu-desktop/Containerfile)
+for a complete example.
 
 On a first build, `finalize` will fail and print the lines the sysusers lock
 file must contain. Add them to `00-bootc-imagectl.lock.conf`, commit it next to
