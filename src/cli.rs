@@ -58,6 +58,12 @@ pub struct FinalizeOpts {
     /// chunkah does not support, e.g. dpkg.
     #[arg(long)]
     pub chunkah_xattrs: bool,
+
+    /// Make /etc transient, discarding changes to it on every boot. The image
+    /// must set the machine ID, e.g. with `systemd.machine_id=firmware` in
+    /// kargs.d.
+    #[arg(long)]
+    pub transient_etc: bool,
 }
 
 /// Options for `install`.

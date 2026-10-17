@@ -25,6 +25,7 @@ mod layout;
 mod presets;
 mod systemd;
 mod tmpfiles;
+mod transient_etc;
 mod units;
 mod var;
 
@@ -48,6 +49,9 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     accounts::finalize(&root, distro, &opts.sysusers_lock).context("finalizing the accounts")?;
     if opts.read_only_accounts {
         account_files::finalize(&root).context("mounting the account files read-only")?;
+    }
+    if opts.transient_etc {
+        transient_etc::finalize(&root).context("making /etc transient")?;
     }
     initramfs::finalize(&root, distro).context("building the initramfs")?;
     identity::finalize(&root, distro).context("removing the machine identity")?;

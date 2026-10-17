@@ -6,7 +6,7 @@ use cap_std_ext::cap_std::fs_utf8::Dir;
 use super::GENERATED_HEADER;
 
 /// The kargs.d directory, relative to the rootfs.
-const KARGS_DIR: &str = "usr/lib/bootc/kargs.d";
+pub(super) const KARGS_DIR: &str = "usr/lib/bootc/kargs.d";
 
 /// The kargs.d file.
 const KARGS_FILE: &str = "10-bootc-imagectl.toml";
