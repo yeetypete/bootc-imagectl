@@ -113,6 +113,10 @@ sudo systemd-cryptenroll --tpm2-device=auto /dev/my-disk
 boot. [bootc recommends](https://bootc.dev/bootc/bootc-filesystem.7.html#etc) this
 configuration where machines need no local configuration in `/etc`.
 
+> [!WARNING]
+> Transient `/etc` is unlikely to work well on desktop images. Settings changed
+at runtime, such as Wi-Fi networks, time zone or printers, would be lost on reboot.
+
 With this flag set `finalize` will automatically relocate state that must
 survive a reboot to `/var`:
 
