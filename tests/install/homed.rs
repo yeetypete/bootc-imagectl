@@ -32,15 +32,26 @@ pub(crate) fn adds_wizard_user_to(groups: &[&str]) -> Result<()> {
 
 /// A user record.
 #[derive(Debug, Deserialize)]
-struct UserRecord {
+pub(crate) struct UserRecord {
+    /// When the record was last changed, in microseconds since the epoch.
+    #[serde(rename = "lastChangeUSec")]
+    pub(crate) last_change_usec: u64,
     /// The fields bound to each machine the record was used on, by machine
     /// ID.
-    binding: BTreeMap<String, Binding>,
+    pub(crate) binding: BTreeMap<String, Binding>,
+}
+
+/// The user record of the wizard's user.
+pub(crate) fn user_record() -> Result<UserRecord> {
+    let output = Command::new("homectl")
+        .args(["inspect", "--json=short", USER])
+        .output_string()?;
+    Ok(serde_json::from_str(&output)?)
 }
 
 /// The `binding` section of a user record for one machine.
 #[derive(Debug, Deserialize)]
-struct Binding {
+pub(crate) struct Binding {
     storage: UserStorage,
 }
 
@@ -58,11 +69,7 @@ enum UserStorage {
 
 /// systemd-homed stored the user's home without encrypting it again.
 pub(crate) fn stores_wizard_user_unencrypted() -> Result<()> {
-    let output = Command::new("homectl")
-        .args(["inspect", "--json=short", USER])
-        .output_string()?;
-    let record: UserRecord = serde_json::from_str(&output)?;
-    let storages: Vec<UserStorage> = record
+    let storages: Vec<UserStorage> = user_record()?
         .binding
         .into_values()
         .map(|binding| binding.storage)

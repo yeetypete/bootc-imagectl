@@ -70,11 +70,29 @@ const INSTALLER_CONTAINER: &str = "bootc-imagectl-install";
 /// Name assigned to the systemd-vmspawn VM.
 const MACHINE: &str = "bootc-imagectl-test";
 
+/// The VM's firmware UUID.
+const MACHINE_UUID: &str = "01234567-89ab-cdef-0123-456789abcdef";
+
 /// Install the image onto a fresh disk, boot it and run the test binary in
 /// it over ssh.
-pub(crate) fn run(sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> Result<()> {
+pub(crate) fn run(
+    sh: &Shell,
+    image: &str,
+    transient_etc: bool,
+    binary: &Path,
+    args: &[OsString],
+) -> Result<()> {
     let work = target_dir(binary)?.join("install");
     let disk = install_disk(sh, image, &work, Passphrase::Fixed)?;
+    // With a transient /etc, the tests run on the second boot, to check that
+    // the state of the first boot survived.
+    if transient_etc {
+        let mut vm = Vm::boot(binary, &work, &disk)?;
+        vm.wait_for_ssh(sh)?;
+        vm.wait_for_boot(sh);
+        vm.power_off(sh)?;
+        vm.check_console()?;
+    }
     let mut vm = Vm::boot(binary, &work, &disk)?;
     vm.wait_for_ssh(sh)?;
     vm.run_tests(sh, binary, args)?;
@@ -159,6 +177,7 @@ fn vmspawn(disk: &Path) -> Command {
     command
         .arg(format!("--image={}", disk.display()))
         .arg(format!("--machine={MACHINE}"))
+        .arg(format!("--uuid={MACHINE_UUID}"))
         // The VMs do not need TPM.
         .args(["--ram=4G", "--register=no", "--tpm=no"]);
     command
@@ -340,6 +359,15 @@ impl Vm {
             .args(args)
             .run()?;
         Ok(())
+    }
+
+    /// Wait for the boot to finish.
+    fn wait_for_boot(&self, sh: &Shell) {
+        let _ = self
+            .ssh(sh, ["systemctl", "is-system-running", "--wait"])
+            .quiet()
+            .ignore_stdout()
+            .run();
     }
 
     /// Power off the installed system and wait for systemd-vmspawn to exit.
