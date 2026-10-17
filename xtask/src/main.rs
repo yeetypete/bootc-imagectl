@@ -20,11 +20,7 @@ mod vm;
 const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 
 /// chunkah OCI image.
-///
-/// TODO: switch to v0.7.1 once published. v0.7.0 ignores
-/// `--source-date-epoch` for xattr components, see
-/// <https://github.com/coreos/chunkah/issues/176>.
-const CHUNKAH: &str = "quay.io/coreos/chunkah:dev@sha256:5538de8ec5563b27ec2f382b6ecdd91cc0ebcd500cf7111cf09ea408b6722384";
+const CHUNKAH: &str = "quay.io/coreos/chunkah:v0.7.1@sha256:71e593421c5de7dcc7c8c5c50e98d3bac572055a76f399f61a491d123c20a523";
 
 /// The max layers chunkah splits an image into.
 const CHUNKAH_MAX_LAYERS: u32 = 128;
