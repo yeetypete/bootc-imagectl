@@ -18,3 +18,4 @@ mod ubuntu;
 mod ubuntu_desktop_example;
 mod ubuntu_homed;
 mod ubuntu_transient_etc;
+mod ubuntu_transient_etc_example;

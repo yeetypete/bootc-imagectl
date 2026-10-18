@@ -14,7 +14,7 @@ use minijinja::{Environment, UndefinedBehavior, Value, context};
 const TEMPLATE_EXTENSION: &str = "j2";
 
 /// The examples with a transient /etc.
-const TRANSIENT_ETC_EXAMPLES: &[&str] = &[];
+const TRANSIENT_ETC_EXAMPLES: &[&str] = &["ubuntu-transient-etc"];
 
 /// A variant of every test image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

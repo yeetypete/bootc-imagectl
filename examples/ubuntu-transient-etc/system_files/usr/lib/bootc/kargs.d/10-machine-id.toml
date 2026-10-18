@@ -1,0 +1,3 @@
+# Derive a stable machine ID from the firmware. Check that the hardware reports
+# a unique product UUID.
+kargs = ["systemd.machine_id=firmware"]

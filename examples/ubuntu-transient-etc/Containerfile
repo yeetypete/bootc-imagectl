@@ -1,0 +1,149 @@
+ARG UBUNTU_IMAGE=docker.io/library/ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
+
+
+FROM ${UBUNTU_IMAGE} AS system-files
+
+COPY system_files/ /system_files/
+RUN chmod -R go-w /system_files
+
+FROM ${UBUNTU_IMAGE} AS bootc-builder
+
+ARG BOOTC_VERSION=v1.17.1
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
+    build-essential \
+    ca-certificates \
+    cargo \
+    git \
+    go-md2man \
+    libostree-dev \
+    libssl-dev \
+    libzstd-dev \
+    pkg-config \
+    rustc
+
+WORKDIR /bootc
+
+RUN git clone --depth 1 --branch "${BOOTC_VERSION}" https://github.com/bootc-dev/bootc.git .
+
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/bootc/target,sharing=locked \
+    CARGO_PROFILE_RELEASE_DEBUG=false CARGO_PROFILE_RELEASE_STRIP=true \
+    make bin install DESTDIR=/out \
+      CARGO_OPTIONS=--no-default-features
+
+
+FROM ${UBUNTU_IMAGE} AS image
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Keep package installs from generating an initramfs.
+ENV INITRD=No
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y systemd
+
+# Create every user and group with the UID and GID the sysusers lock file fixes
+# before any package can allocate a different one.
+COPY --from=system-files /system_files/usr/lib/sysusers.d/00-bootc-imagectl.lock.conf /usr/lib/sysusers.d/
+RUN systemd-sysusers
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
+    binutils \
+    btrfs-progs \
+    cryptsetup-bin \
+    dmsetup \
+    dosfstools \
+    dracut \
+    fdisk \
+    libnss-systemd \
+    linux-image-generic \
+    openssh-server \
+    ostree \
+    podman \
+    skopeo \
+    sudo-rs \
+    systemd-boot \
+    systemd-boot-efi \
+    systemd-cryptsetup \
+    systemd-homed \
+    systemd-repart \
+    systemd-sysv \
+    systemd-ukify \
+    zstd
+
+# A minimal headless Ubuntu setup. systemd-networkd and systemd-resolved manage
+# the network, and systemd-homed creates the first user.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
+    systemd-resolved \
+    systemd-timesyncd \
+    ubuntu-minimal
+
+COPY --from=bootc-builder /out/usr/ /usr/
+
+# systemd-homed's first boot wizard creates the first user.
+RUN userdel --remove ubuntu
+
+COPY --from=system-files /system_files/ /
+
+# A transient /etc requires setting systemd-firstboot's settings in the image.
+RUN systemd-firstboot --locale=C.UTF-8
+
+RUN systemctl enable systemd-homed-firstboot.service
+
+LABEL containers.bootc=1
+CMD ["/sbin/init"]
+
+
+FROM image AS finalized
+
+# The directory holding bootc-imagectl is passed as the bootc-imagectl build
+# context, see the build steps above the uki stage.
+COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
+RUN --network=none /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts --chunkah-xattrs --transient-etc
+
+
+# The UKI embeds the kernel and initramfs.
+FROM finalized AS rootfs
+
+RUN bootc container split-kernel-and-rootfs --output /kernel && \
+    rm -r /kernel
+
+RUN bootc container lint --fatal-warnings
+
+
+# The rootfs stage, rechunked by chunkah, is passed as the chunked build
+# context:
+#
+#     podman build --build-context bootc-imagectl=target/release \
+#       --target rootfs --tag localhost/rootfs .
+#     podman run --rm --mount type=image,src=localhost/rootfs,dst=/chunkah \
+#       --env CHUNKAH_CONFIG_STR="$(podman image inspect localhost/rootfs)" \
+#       quay.io/coreos/chunkah build --max-layers 128 --source-date-epoch 0 \
+#       --tag localhost/chunked | podman load
+#     podman build --build-context bootc-imagectl=target/release \
+#       --build-context chunked=container-image://localhost/chunked .
+#
+# Seal the UKI from chunked so that its composefs digest covers the mtimes
+# chunkah rewrites.
+FROM chunked AS uki
+
+RUN --mount=type=bind,from=chunked,target=/target \
+    --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
+    kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
+    mkdir /uki && \
+    bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
+      -- --output "/uki/${kver}.efi"
+
+
+FROM chunked
+
+COPY --from=uki /uki/ /boot/EFI/Linux/
