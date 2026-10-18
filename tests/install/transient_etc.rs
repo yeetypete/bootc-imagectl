@@ -6,7 +6,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::finalize::{PULL_SECRET, PULL_SECRET_LINK, ssh_host_keys};
+use bootc_imagectl::finalize::{DBUS_MACHINE_ID, PULL_SECRET, PULL_SECRET_LINK, ssh_host_keys};
 use bootc_imagectl::testing::{boot_time, written_before_boot};
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -35,6 +35,18 @@ pub(crate) fn keeps_machine_id() -> Result<()> {
     let machine_id = fs::read_to_string("/etc/machine-id")?;
     let machine_ids: Vec<String> = user_record()?.binding.into_keys().collect();
     assert_eq!(machine_ids, [machine_id.trim()]);
+    Ok(())
+}
+
+/// The first boot persisted the machine ID in /var.
+pub(crate) fn persists_machine_id_in_var() -> Result<()> {
+    let path = Path::new(DBUS_MACHINE_ID);
+    assert!(path.symlink_metadata()?.is_file());
+    assert!(written_before_boot(path)?);
+    assert_eq!(
+        fs::read_to_string(path)?,
+        fs::read_to_string("/etc/machine-id")?
+    );
     Ok(())
 }
 

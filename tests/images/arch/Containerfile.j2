@@ -78,11 +78,8 @@ RUN systemctl enable systemd-boot-check-no-failures.service
 RUN systemctl enable systemd-homed-firstboot.service
 {% endif %}
 {% if transient_etc %}
-# A transient /etc requires setting the machine ID and systemd-firstboot's
-# settings in the image.
-RUN mkdir -p /usr/lib/bootc/kargs.d && \
-    echo 'kargs = ["systemd.machine_id=firmware"]' > /usr/lib/bootc/kargs.d/10-machine-id.toml && \
-    systemd-firstboot --keymap=us --timezone=UTC
+# A transient /etc requires setting systemd-firstboot's settings in the image.
+RUN systemd-firstboot --keymap=us --timezone=UTC
 {% endif %}
 
 LABEL containers.bootc=1

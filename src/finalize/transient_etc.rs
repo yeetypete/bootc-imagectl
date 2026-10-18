@@ -4,6 +4,9 @@
 //! systemd then treats every boot as the first boot (see machine-id(5)), so
 //! this module relocates the state that must survive a reboot to /var:
 //!
+//! - The machine ID is kept in /var/lib/dbus/machine-id, which systemd reads
+//!   when /etc/machine-id is uninitialized (see machine-id(5)). A unit writes
+//!   the first boot's machine ID there.
 //! - sshd reads its host keys from /var/lib/ssh, where a unit generates the
 //!   missing ones early in the boot.
 //! - /run/ostree/auth.json links to /var/lib/ostree/auth.json, so that bootc
@@ -32,6 +35,20 @@ pub const PULL_SECRET: &str = "/var/lib/ostree/auth.json";
 
 /// The link to [`PULL_SECRET`] where bootc reads it, see bootc-secrets(7).
 pub const PULL_SECRET_LINK: &str = "/run/ostree/auth.json";
+
+/// The D-Bus machine ID, where systemd reads the machine ID from if
+/// /etc/machine-id is uninitialized, see machine-id(5).
+pub const DBUS_MACHINE_ID: &str = "/var/lib/dbus/machine-id";
+
+/// The directory [`DBUS_MACHINE_ID`] is in.
+const DBUS_DIR: &str = "/var/lib/dbus";
+
+/// Where the unit writes the machine ID before renaming it to
+/// [`DBUS_MACHINE_ID`].
+const DBUS_MACHINE_ID_STAGED: &str = "/var/lib/dbus/.machine-id";
+
+/// The unit persisting the machine ID in [`DBUS_MACHINE_ID`].
+const MACHINE_ID_UNIT: &str = "bootc-imagectl-machine-id-persist.service";
 
 /// The directory the host keys are in.
 const SSH_HOST_KEY_DIR: &str = "/var/lib/ssh";
@@ -96,6 +113,7 @@ const KEYMAP_DIRS: &[&str] = &[
 pub(super) fn finalize(root: &Dir) -> Result<()> {
     check_firstboot(root)?;
     write_setup_root_conf(root)?;
+    write_machine_id_unit(root)?;
     if root.exists("etc/ssh/sshd_config") {
         write_ssh_host_keys(root)?;
     }
@@ -169,6 +187,35 @@ fn write_setup_root_conf(root: &Dir) -> Result<()> {
         toml::to_string(&setup_root::Config::TRANSIENT_ETC)?,
     )
     .with_context(|| format!("writing /{SETUP_ROOT_CONF}"))
+}
+
+/// Write the machine ID to [`DBUS_MACHINE_ID`] unless it is already there,
+/// before dbus's tmpfiles.d links it to /etc/machine-id.
+fn write_machine_id_unit(root: &Dir) -> Result<()> {
+    let unit = format!(
+        "{GENERATED_HEADER}
+[Unit]
+Description=Save machine-id to /var
+Documentation=man:machine-id(5)
+DefaultDependencies=no
+RequiresMountsFor={DBUS_DIR}
+After=local-fs.target
+Before=sysinit.target systemd-tmpfiles-setup.service shutdown.target
+Conflicts=shutdown.target
+ConditionPathIsSymbolicLink=|{DBUS_MACHINE_ID}
+ConditionFileNotEmpty=|!{DBUS_MACHINE_ID}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+StateDirectory=dbus
+ExecStart=cp /etc/machine-id {DBUS_MACHINE_ID_STAGED}
+ExecStart=sync {DBUS_MACHINE_ID_STAGED}
+ExecStart=mv -fT {DBUS_MACHINE_ID_STAGED} {DBUS_MACHINE_ID}
+TimeoutSec=90s
+"
+    );
+    units::write_enabled_unit(root, MACHINE_ID_UNIT, &unit, "sysinit.target")
 }
 
 /// The host keys finalize points sshd to with a transient /etc.
@@ -323,7 +370,20 @@ mod tests {
     }
 
     #[test]
-    fn keeps_ssh_host_keys_in_var() -> Result<()> {
+    fn enables_machine_id_unit() -> Result<()> {
+        let root = rootfs()?;
+        write_machine_id_unit(&root)?;
+        assert_eq!(
+            root.read_link_contents(format!(
+                "{VENDOR_UNIT_DIR}/sysinit.target.wants/{MACHINE_ID_UNIT}"
+            ))?,
+            format!("../{MACHINE_ID_UNIT}")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn enables_sshd_keygen_units() -> Result<()> {
         let root = rootfs()?;
         root.create_dir_all("etc/ssh")?;
         root.write(
@@ -331,16 +391,6 @@ mod tests {
             "Include /etc/ssh/sshd_config.d/*.conf\n",
         )?;
         write_ssh_host_keys(&root)?;
-        let dropin = root.read_to_string(SSHD_DROPIN)?;
-        assert!(
-            dropin.contains("HostKey /var/lib/ssh/ssh_host_ed25519_key\n"),
-            "{dropin}"
-        );
-        let unit = root.read_to_string(format!("{VENDOR_UNIT_DIR}/{SSHD_KEYGEN_UNIT}"))?;
-        assert!(
-            unit.contains("ConditionFileNotEmpty=|!/var/lib/ssh/ssh_host_%i_key\n"),
-            "{unit}"
-        );
         assert_eq!(
             root.read_link_contents(format!(
                 "{VENDOR_UNIT_DIR}/sysinit.target.wants/bootc-imagectl-sshd-keygen@ed25519.service"

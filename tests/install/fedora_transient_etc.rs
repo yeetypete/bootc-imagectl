@@ -35,6 +35,11 @@ fn keeps_machine_id() -> Result<()> {
 }
 
 #[test]
+fn persists_machine_id_in_var() -> Result<()> {
+    transient_etc::persists_machine_id_in_var()
+}
+
+#[test]
 fn keeps_ssh_host_keys() -> Result<()> {
     transient_etc::keeps_ssh_host_keys()
 }
