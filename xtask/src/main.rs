@@ -118,6 +118,17 @@ struct Selection {
 }
 
 impl Build {
+    /// This build without its cache destinations.
+    fn without_cache_to(&self) -> Self {
+        let options = self
+            .options
+            .iter()
+            .filter(|option| !option.starts_with("--cache-to"))
+            .cloned()
+            .collect();
+        Self { options }
+    }
+
     /// Build the image `name` rendered into `dir` with the bootc-imagectl
     /// binary from `target`, passing `args` to the builder.
     fn build(
@@ -226,6 +237,10 @@ fn test_image(sh: &Shell, build: &Build, tag: &str) -> Result<()> {
     let selection = Selection {
         images: vec![tag.to_owned()],
     };
+    // podman pushes even locally cached steps to --cache-to. Only let the
+    // first suite push.
+    let later = build.without_cache_to();
+    let mut build = build;
     for suite in Suite::value_variants() {
         if !suite.images()?.iter().any(|image| image.tag() == tag) {
             continue;
@@ -235,9 +250,13 @@ fn test_image(sh: &Shell, build: &Build, tag: &str) -> Result<()> {
                 for filesystem in install::FILESYSTEMS {
                     let _env = sh.push_env(install::FILESYSTEM_ENV, filesystem);
                     test(sh, build, &selection, *suite, &[])?;
+                    build = &later;
                 }
             }
-            Suite::Container | Suite::Vm => test(sh, build, &selection, *suite, &[])?,
+            Suite::Container | Suite::Vm => {
+                test(sh, build, &selection, *suite, &[])?;
+                build = &later;
+            }
         }
     }
     Ok(())
