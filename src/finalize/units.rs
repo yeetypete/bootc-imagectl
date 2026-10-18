@@ -117,10 +117,17 @@ pub(super) fn write_enabled_template(
     instances: &[&str],
     wanted_by: &str,
 ) -> Result<()> {
+    let (prefix, suffix) = template
+        .split_once("@.")
+        .with_context(|| format!("{template} is not a template unit"))?;
     write_unit(root, template, content)?;
     for instance in instances {
-        let name = template.replacen("@.", &format!("@{instance}."), 1);
-        enable(root, template, &name, wanted_by)?;
+        enable(
+            root,
+            template,
+            &format!("{prefix}@{instance}.{suffix}"),
+            wanted_by,
+        )?;
     }
     Ok(())
 }
