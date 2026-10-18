@@ -3,11 +3,10 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::finalize::ssh_host_keys;
+use bootc_imagectl::finalize::{PULL_SECRET, PULL_SECRET_LINK, ssh_host_keys};
 use bootc_imagectl::testing::{boot_time, written_before_boot};
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -27,9 +26,7 @@ pub(crate) fn mounts_etc_transient() -> Result<()> {
 
 /// The wizard's user created on the first boot is still present.
 pub(crate) fn keeps_wizard_user() -> Result<()> {
-    let last_change =
-        SystemTime::UNIX_EPOCH + Duration::from_micros(user_record()?.last_change_usec);
-    assert!(last_change < boot_time());
+    assert!(user_record()?.last_change < boot_time());
     Ok(())
 }
 
@@ -59,9 +56,6 @@ pub(crate) fn keeps_ssh_host_keys() -> Result<()> {
 
 /// bootc's pull secret is linked into /run.
 pub(crate) fn links_pull_secret() -> Result<()> {
-    assert_eq!(
-        fs::read_link("/run/ostree/auth.json")?,
-        Path::new("/var/lib/ostree/auth.json")
-    );
+    assert_eq!(fs::read_link(PULL_SECRET_LINK)?, Path::new(PULL_SECRET));
     Ok(())
 }

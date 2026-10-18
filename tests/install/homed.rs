@@ -2,10 +2,11 @@
 
 use std::collections::BTreeMap;
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 /// The user the xtask passes a credential for.
 const USER: &str = "alice";
@@ -33,12 +34,18 @@ pub(crate) fn adds_wizard_user_to(groups: &[&str]) -> Result<()> {
 /// A user record.
 #[derive(Debug, Deserialize)]
 pub(crate) struct UserRecord {
-    /// When the record was last changed, in microseconds since the epoch.
-    #[serde(rename = "lastChangeUSec")]
-    pub(crate) last_change_usec: u64,
+    /// When the record was last changed.
+    #[serde(rename = "lastChangeUSec", deserialize_with = "from_usec")]
+    pub(crate) last_change: SystemTime,
     /// The fields bound to each machine the record was used on, by machine
     /// ID.
     pub(crate) binding: BTreeMap<String, Binding>,
+}
+
+/// Deserialize a time in microseconds since the epoch.
+fn from_usec<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SystemTime, D::Error> {
+    let usec = u64::deserialize(deserializer)?;
+    Ok(SystemTime::UNIX_EPOCH + Duration::from_micros(usec))
 }
 
 /// The user record of the wizard's user.
