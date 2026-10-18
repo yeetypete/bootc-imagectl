@@ -1,8 +1,12 @@
-//! Checks shared by the container and the VM tests, built only with their
-//! features.
+//! Checks shared by the container, the install and the VM tests, built only
+//! with their features.
 
-use anyhow::Result;
+use std::path::Path;
+use std::time::{Duration, SystemTime};
+
+use anyhow::{Context as _, Result};
 use cap_std_ext::cap_std::fs_utf8::Dir;
+use rustix::time::{ClockId, clock_gettime};
 
 use crate::id::{Gid, Uid};
 use crate::passwd::{Entry as _, Group, Gshadow, Passwd, Shadow};
@@ -37,4 +41,30 @@ pub fn etc_contains_only_root_and_nobody(root: &Dir) -> Result<()> {
         assert!(!root.exists(format!("etc/{name}-")), "/etc/{name}- exists");
     }
     Ok(())
+}
+
+/// The time the system booted.
+///
+/// # Panics
+///
+/// Panics if `CLOCK_BOOTTIME` is negative, which the kernel never reports.
+#[must_use]
+pub fn boot_time() -> SystemTime {
+    let since_boot = Duration::try_from(clock_gettime(ClockId::Boottime))
+        .expect("CLOCK_BOOTTIME is never negative");
+    SystemTime::now() - since_boot
+}
+
+/// Whether `path`, or the symlink at `path`, was last written before the
+/// system booted.
+///
+/// # Errors
+///
+/// Fails if the metadata of `path` cannot be read.
+pub fn written_before_boot(path: &Path) -> Result<bool> {
+    let modified = path
+        .symlink_metadata()
+        .with_context(|| format!("reading {}", path.display()))?
+        .modified()?;
+    Ok(modified < boot_time())
 }

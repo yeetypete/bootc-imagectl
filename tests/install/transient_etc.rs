@@ -5,30 +5,13 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
+use bootc_imagectl::finalize::ssh_host_keys;
+use bootc_imagectl::testing::{boot_time, written_before_boot};
+use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::homed::user_record;
-
-/// The time the system booted.
-fn boot_time() -> Result<SystemTime> {
-    let stat = fs::read_to_string("/proc/stat")?;
-    let seconds: u64 = stat
-        .lines()
-        .find_map(|line| line.strip_prefix("btime "))
-        .context("no btime in /proc/stat")?
-        .trim()
-        .parse()?;
-    Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
-}
-
-/// Whether `path` was last written before this boot.
-fn written_before_boot(path: &str) -> Result<bool> {
-    let modified = fs::metadata(path)
-        .with_context(|| format!("reading the metadata of {path}"))?
-        .modified()?;
-    Ok(modified < boot_time()?)
-}
 
 /// bootc mounted /etc as a transient overlay.
 pub(crate) fn mounts_etc_transient() -> Result<()> {
@@ -46,7 +29,7 @@ pub(crate) fn mounts_etc_transient() -> Result<()> {
 pub(crate) fn keeps_wizard_user() -> Result<()> {
     let last_change =
         SystemTime::UNIX_EPOCH + Duration::from_micros(user_record()?.last_change_usec);
-    assert!(last_change < boot_time()?);
+    assert!(last_change < boot_time());
     Ok(())
 }
 
@@ -58,11 +41,18 @@ pub(crate) fn keeps_machine_id() -> Result<()> {
     Ok(())
 }
 
-/// The SSH host keys are from the first boot.
+/// sshd uses the host keys in /var from the first boot.
 pub(crate) fn keeps_ssh_host_keys() -> Result<()> {
-    for key_type in ["ecdsa", "ed25519", "rsa"] {
-        let key = format!("/var/lib/ssh/ssh_host_{key_type}_key");
-        assert!(written_before_boot(&key)?, "{key}");
+    let keys: Vec<Utf8PathBuf> = ssh_host_keys().collect();
+    let config = Command::new("sshd").arg("-T").output_string()?;
+    let loaded: Vec<&Utf8Path> = config
+        .lines()
+        .filter_map(|line| line.strip_prefix("hostkey "))
+        .map(Utf8Path::new)
+        .collect();
+    assert_eq!(loaded, keys);
+    for key in &keys {
+        assert!(written_before_boot(key.as_std_path())?, "{key}");
     }
     Ok(())
 }
