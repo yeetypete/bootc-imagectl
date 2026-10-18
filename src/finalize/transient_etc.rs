@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_keymap_without_keymaps() -> Result<()> {
+    fn accepts_unset_keymap_without_installed_keymaps() -> Result<()> {
         let root = firstboot_image(&["etc/locale.conf", "etc/localtime"])?;
         check_firstboot(&root)
     }
