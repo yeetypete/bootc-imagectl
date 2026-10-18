@@ -44,8 +44,10 @@ pub(crate) fn keeps_ssh_host_keys() -> Result<()> {
     let config = Command::new("sshd").arg("-T").output_string()?;
     let loaded: Vec<&Utf8Path> = config
         .lines()
-        .filter_map(|line| line.strip_prefix("hostkey "))
-        .map(Utf8Path::new)
+        .filter_map(|line| line.split_once(' '))
+        // Newer OpenSSH prints the keywords in camel case.
+        .filter(|(keyword, _)| keyword.eq_ignore_ascii_case("hostkey"))
+        .map(|(_, path)| Utf8Path::new(path))
         .collect();
     assert_eq!(loaded, keys);
     for key in &keys {
