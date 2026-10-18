@@ -1,5 +1,6 @@
 //! Developer tasks, run with `cargo xtask`.
 
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -44,6 +45,13 @@ enum Task {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<OsString>,
     },
+    /// Run every suite against one image.
+    TestImage {
+        #[command(flatten)]
+        build: Build,
+        /// The image's tag, e.g. `ubuntu` or `ubuntu-desktop-example`.
+        image: String,
+    },
     /// Build a test image and boot it in a VM with its console on this
     /// terminal.
     Vm {
@@ -60,7 +68,8 @@ enum Task {
         /// The example's directory in examples/, e.g. `ubuntu`.
         name: String,
     },
-    /// Print the matrix of test jobs as JSON, consumable by GitHub Actions.
+    /// Print the matrices of the test and cache pruning jobs as JSON,
+    /// consumable by GitHub Actions.
     Matrix,
     /// Run a test binary against each of the suite's images. Cargo runs
     /// this through `test`.
@@ -171,6 +180,7 @@ fn main() -> Result<()> {
             suite,
             args,
         } => test(&sh, &build, &selection, suite, &args),
+        Task::TestImage { build, image } => test_image(&sh, &build, &image),
         Task::Vm { build, image } => boot(&sh, &build, &image),
         Task::Example { build, name } => example(&sh, &build, &name),
         Task::Matrix => {
@@ -187,31 +197,50 @@ fn main() -> Result<()> {
     }
 }
 
-/// The GitHub Actions matrix of test jobs.
+/// The GitHub Actions matrices:
+///
+/// 1. The test jobs, one per image.
+/// 2. The jobs pruning the build cache, one per cache package.
 fn matrix() -> Result<Value> {
-    let mut jobs = Vec::new();
+    let images = Suite::Install.images()?;
+    let tests: Vec<Value> = images
+        .iter()
+        .map(|image| json!({ "name": format!("test-{}", image.tag()), "image": image.tag() }))
+        .collect();
+    let caches: BTreeSet<String> = images.iter().map(images::Image::build_name).collect();
+    let prunes: Vec<Value> = caches
+        .into_iter()
+        .map(|cache| json!({ "cache": cache }))
+        .collect();
+    Ok(json!({
+        "test": { "include": tests },
+        "prune": { "include": prunes },
+    }))
+}
+
+/// Run every suite that tests the image tagged `tag`, the install tests on
+/// each filesystem.
+fn test_image(sh: &Shell, build: &Build, tag: &str) -> Result<()> {
+    // The install suite tests every image.
+    find_image(&Suite::Install.images()?, tag)?;
+    let selection = Selection {
+        images: vec![tag.to_owned()],
+    };
     for suite in Suite::value_variants() {
-        let tags: Vec<String> = suite.images()?.iter().map(images::Image::tag).collect();
-        for image in &tags {
-            let name = format!("test-{}-{image}", suite.name());
-            match suite {
-                Suite::Install => jobs.extend(install::FILESYSTEMS.map(|filesystem| {
-                    json!({
-                        "name": format!("{name}-{filesystem}"),
-                        "suite": suite.name(),
-                        "image": image,
-                        "filesystem": filesystem,
-                    })
-                })),
-                Suite::Container | Suite::Vm => jobs.push(json!({
-                    "name": name,
-                    "suite": suite.name(),
-                    "image": image,
-                })),
+        if !suite.images()?.iter().any(|image| image.tag() == tag) {
+            continue;
+        }
+        match suite {
+            Suite::Install => {
+                for filesystem in install::FILESYSTEMS {
+                    let _env = sh.push_env(install::FILESYSTEM_ENV, filesystem);
+                    test(sh, build, &selection, *suite, &[])?;
+                }
             }
+            Suite::Container | Suite::Vm => test(sh, build, &selection, *suite, &[])?,
         }
     }
-    Ok(json!({ "include": jobs }))
+    Ok(())
 }
 
 /// Run `cargo test` for the suite with this binary as the runner.
