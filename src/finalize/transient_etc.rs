@@ -7,15 +7,13 @@
 //! - The machine ID is kept in /var/lib/dbus/machine-id, which systemd reads
 //!   when /etc/machine-id is uninitialized (see machine-id(5)). A unit writes
 //!   the first boot's machine ID there.
-//! - sshd reads its host keys from /var/lib/ssh, where a unit generates the
-//!   missing ones early in the boot.
+//! - sshd's host keys are kept in /var/lib/ssh, where a unit generates the
+//!   missing ones early in the boot. /etc/ssh links to them.
 //! - /run/ostree/auth.json links to /var/lib/ostree/auth.json, so that bootc
 //!   can pull from a registry that requires a login (see bootc-secrets(7)).
 //!
 //! This module also fails the build if systemd-firstboot would prompt on every
 //! boot.
-
-use std::fmt::Write;
 
 use anyhow::{Context, Result, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
@@ -27,7 +25,7 @@ use super::GENERATED_HEADER;
 use super::kargs::{self, KARGS_DIR};
 use super::layout::SETUP_ROOT_CONF;
 use super::setup_root;
-use super::tmpfiles::{Entry, USR_TMPFILES_DIR};
+use super::tmpfiles::{self, Entry};
 use super::units::{self, VENDOR_UNIT_DIR};
 
 /// bootc's persistent pull secret.
@@ -56,15 +54,15 @@ const SSH_HOST_KEY_DIR: &str = "/var/lib/ssh";
 /// The host key types sshd loads by default.
 const SSH_HOST_KEY_TYPES: &[&str] = &["ecdsa", "ed25519", "rsa"];
 
-/// The sshd drop-in pointing sshd to the host keys.
-const SSHD_DROPIN: &str = "etc/ssh/sshd_config.d/10-bootc-imagectl.conf";
-
 /// The template unit generating a missing host key of the type it is
 /// instantiated with.
 const SSHD_KEYGEN_UNIT: &str = "bootc-imagectl-sshd-keygen@.service";
 
 /// The tmpfiles.d file linking the pull secret into /run.
-const TMPFILES: &str = "bootc-imagectl-transient-etc.conf";
+const PULL_SECRET_TMPFILES: &str = "bootc-imagectl-pull-secret.conf";
+
+/// The tmpfiles.d file linking the host keys into /etc/ssh.
+const SSH_HOST_KEYS_TMPFILES: &str = "bootc-imagectl-ssh-host-keys.conf";
 
 /// A setting systemd-firstboot prompts for unless its file exists, see
 /// systemd-firstboot(1).
@@ -108,16 +106,17 @@ const KEYMAP_DIRS: &[&str] = &[
 ///
 /// # Errors
 ///
-/// Fails if the image already configures the mounts, systemd-firstboot would
-/// prompt, or sshd does not read drop-ins.
+/// Fails if the image's bootc setup-root configuration does not make /etc
+/// transient, or systemd-firstboot would prompt.
 pub(super) fn finalize(root: &Dir) -> Result<()> {
     check_firstboot(root)?;
     write_setup_root_conf(root)?;
     write_machine_id_unit(root)?;
     if root.exists("etc/ssh/sshd_config") {
-        write_ssh_host_keys(root)?;
+        write_sshd_keygen_units(root)?;
+        write_ssh_host_key_links(root)?;
     }
-    write_tmpfiles(root)
+    write_pull_secret_link(root)
 }
 
 /// Fail if systemd-firstboot would prompt on every boot.
@@ -218,31 +217,26 @@ TimeoutSec=90s
     units::write_enabled_unit(root, MACHINE_ID_UNIT, &unit, "sysinit.target")
 }
 
-/// The host keys finalize points sshd to with a transient /etc.
+/// The host keys in /var that /etc/ssh links to with a transient /etc.
 pub fn ssh_host_keys() -> impl Iterator<Item = Utf8PathBuf> {
     SSH_HOST_KEY_TYPES
         .iter()
         .map(|key_type| Utf8Path::new(SSH_HOST_KEY_DIR).join(format!("ssh_host_{key_type}_key")))
 }
 
-/// Point sshd to host keys in /var, generated before sshd starts.
-fn write_ssh_host_keys(root: &Dir) -> Result<()> {
-    let config = root.read_to_string("etc/ssh/sshd_config")?;
-    ensure!(
-        config.lines().any(|line| {
-            line.trim_start().starts_with("Include") && line.contains("sshd_config.d/")
-        }),
-        "/etc/ssh/sshd_config does not include /etc/ssh/sshd_config.d, where finalize points sshd to the host keys in {SSH_HOST_KEY_DIR}"
-    );
-    let mut dropin = format!("{GENERATED_HEADER}\n");
-    for key in ssh_host_keys() {
-        let _ = writeln!(dropin, "HostKey {key}");
-    }
-    root.create_dir_all("etc/ssh/sshd_config.d")?;
-    debug!("writing /{SSHD_DROPIN}");
-    root.write(SSHD_DROPIN, dropin)
-        .with_context(|| format!("writing /{SSHD_DROPIN}"))?;
+/// The links in /etc/ssh to the host keys and their public keys in /var.
+fn ssh_host_key_links() -> impl Iterator<Item = (Utf8PathBuf, Utf8PathBuf)> {
+    ssh_host_keys().flat_map(|key| {
+        let public = key.with_extension("pub");
+        [key, public].map(|target| {
+            let name = target.file_name().expect("host keys have file names");
+            (Utf8Path::new("/etc/ssh").join(name), target)
+        })
+    })
+}
 
+/// Generate the missing host keys in /var before sshd starts.
+fn write_sshd_keygen_units(root: &Dir) -> Result<()> {
     let unit = format!(
         "{GENERATED_HEADER}
 [Unit]
@@ -271,17 +265,23 @@ ExecStart=ssh-keygen -q -t %i -N \"\" -C \"\" -f {SSH_HOST_KEY_DIR}/ssh_host_%i_
     )
 }
 
+/// Link the host keys in /var into /etc/ssh, where sshd reads them.
+fn write_ssh_host_key_links(root: &Dir) -> Result<()> {
+    let links: Vec<_> = ssh_host_key_links().collect();
+    let entries = links.iter().map(|(link, target)| Entry::Symlink {
+        path: link.as_str(),
+        target: target.as_str(),
+    });
+    tmpfiles::write_config(root, SSH_HOST_KEYS_TMPFILES, entries)
+}
+
 /// Link bootc's pull secret in /var into /run, where bootc reads it.
-fn write_tmpfiles(root: &Dir) -> Result<()> {
-    let path = format!("{USR_TMPFILES_DIR}/{TMPFILES}");
-    root.create_dir_all(USR_TMPFILES_DIR)?;
-    debug!("writing /{path}");
+fn write_pull_secret_link(root: &Dir) -> Result<()> {
     let link = Entry::Symlink {
         path: PULL_SECRET_LINK,
         target: PULL_SECRET,
     };
-    root.write(&path, format!("{GENERATED_HEADER}\n{link}\n"))
-        .with_context(|| format!("writing /{path}"))
+    tmpfiles::write_config(root, PULL_SECRET_TMPFILES, [link])
 }
 
 #[cfg(test)]
@@ -385,12 +385,7 @@ mod tests {
     #[test]
     fn enables_sshd_keygen_units() -> Result<()> {
         let root = rootfs()?;
-        root.create_dir_all("etc/ssh")?;
-        root.write(
-            "etc/ssh/sshd_config",
-            "Include /etc/ssh/sshd_config.d/*.conf\n",
-        )?;
-        write_ssh_host_keys(&root)?;
+        write_sshd_keygen_units(&root)?;
         assert_eq!(
             root.read_link_contents(format!(
                 "{VENDOR_UNIT_DIR}/sysinit.target.wants/bootc-imagectl-sshd-keygen@ed25519.service"
@@ -401,11 +396,17 @@ mod tests {
     }
 
     #[test]
-    fn requires_sshd_config_include() -> Result<()> {
+    fn links_ssh_host_keys_into_etc() -> Result<()> {
         let root = rootfs()?;
-        root.create_dir_all("etc/ssh")?;
-        root.write("etc/ssh/sshd_config", "PermitRootLogin no\n")?;
-        assert!(write_ssh_host_keys(&root).is_err());
+        write_ssh_host_key_links(&root)?;
+        let conf = root.read_to_string(format!(
+            "{}/{SSH_HOST_KEYS_TMPFILES}",
+            tmpfiles::USR_TMPFILES_DIR
+        ))?;
+        let declared = tmpfiles::declared_paths(&conf);
+        for (link, _) in ssh_host_key_links() {
+            assert!(declared.contains(link.as_str()), "{declared:?}");
+        }
         Ok(())
     }
 }

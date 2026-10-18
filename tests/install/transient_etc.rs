@@ -50,20 +50,26 @@ pub(crate) fn persists_machine_id_in_var() -> Result<()> {
     Ok(())
 }
 
-/// sshd uses the host keys in /var from the first boot.
+/// sshd uses the host keys in /var from the first boot, which /etc/ssh links
+/// to.
 pub(crate) fn keeps_ssh_host_keys() -> Result<()> {
     let keys: Vec<Utf8PathBuf> = ssh_host_keys().collect();
     let config = Command::new("sshd").arg("-T").output_string()?;
-    let loaded: Vec<&Utf8Path> = config
+    let mut loaded = config
         .lines()
         .filter_map(|line| line.split_once(' '))
         // Newer OpenSSH prints the keywords in camel case.
         .filter(|(keyword, _)| keyword.eq_ignore_ascii_case("hostkey"))
-        .map(|(_, path)| Utf8Path::new(path))
-        .collect();
+        .map(|(_, path)| Utf8Path::new(path).canonicalize_utf8())
+        .collect::<Result<Vec<_>, _>>()?;
+    loaded.sort();
     assert_eq!(loaded, keys);
     for key in &keys {
         assert!(written_before_boot(key.as_std_path())?, "{key}");
+        for target in [key.clone(), key.with_extension("pub")] {
+            let link = Utf8Path::new("/etc/ssh").join(target.file_name().unwrap());
+            assert_eq!(fs::read_link(&link)?, target.as_std_path(), "{link}");
+        }
     }
     Ok(())
 }

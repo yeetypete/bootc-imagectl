@@ -123,7 +123,7 @@ survive a reboot to `/var`:
 - The machine ID generated on the first boot is kept in
   `/var/lib/dbus/machine-id`, which systemd reads when `/etc/machine-id` is
   uninitialized (see [machine-id(5)](https://www.freedesktop.org/software/systemd/man/latest/machine-id.html)).
-- sshd's host keys are generated in `/var/lib/ssh`.
+- sshd's host keys are generated in `/var/lib/ssh` and linked from `/etc/ssh`.
 - bootc's pull secret is linked from `/run/ostree/auth.json` to
   `/var/lib/ostree/auth.json`.
 

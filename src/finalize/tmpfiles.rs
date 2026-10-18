@@ -1,6 +1,10 @@
-//! Patch the tmpfiles.d(5) files systemd ships to match the toplevel symlinks
-//! (see layout.rs). Also read which paths the tmpfiles.d files in the image
-//! declare, so the generated /var entries (see var.rs) do not repeat them.
+//! tmpfiles.d(5) support: build, parse and write tmpfiles.d lines.
+//!
+//! - Write the tmpfiles.d files.
+//! - Read which paths the tmpfiles.d files in the image declare, so the
+//!   generated /var entries (see var.rs) do not repeat them.
+//! - Patch the tmpfiles.d files systemd ships to match the toplevel symlinks
+//!   (see layout.rs).
 
 use std::collections::HashSet;
 use std::fmt::{self, Write};
@@ -11,6 +15,7 @@ use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 use tracing::debug;
 
+use super::GENERATED_HEADER;
 use crate::command::CommandRunExt;
 
 /// Where packages install their tmpfiles.d files. Generated files go here too.
@@ -128,6 +133,23 @@ pub(super) fn declared_paths(config: &str) -> HashSet<String> {
         .filter_map(created_path)
         .map(expand_specifier)
         .collect()
+}
+
+/// Write `entries` to the generated tmpfiles.d file `name`.
+pub(super) fn write_config<'a>(
+    root: &Dir,
+    name: &str,
+    entries: impl IntoIterator<Item = Entry<'a>>,
+) -> Result<()> {
+    let path = format!("{USR_TMPFILES_DIR}/{name}");
+    root.create_dir_all(USR_TMPFILES_DIR)?;
+    debug!("writing /{path}");
+    let mut config = format!("{GENERATED_HEADER}\n");
+    for entry in entries {
+        let _ = writeln!(config, "{entry}");
+    }
+    root.write(&path, config)
+        .with_context(|| format!("writing /{path}"))
 }
 
 /// Patch the tmpfiles.d files systemd ships to match the toplevel symlinks.
