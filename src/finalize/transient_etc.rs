@@ -17,14 +17,14 @@ use std::fmt::Write;
 use anyhow::{Context, Result, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::fs_utf8::Dir;
-use cap_std_ext::dirext::CapStdExtDirExtUtf8;
+use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 use serde::Deserialize;
 use tracing::debug;
 
 use super::GENERATED_HEADER;
 use super::kargs::KARGS_DIR;
 use super::layout::SETUP_ROOT_CONF;
-use super::tmpfiles::USR_TMPFILES_DIR;
+use super::tmpfiles::{Entry, USR_TMPFILES_DIR};
 use super::units::{self, VENDOR_UNIT_DIR};
 
 /// The setup-root configuration that makes /etc transient.
@@ -86,7 +86,10 @@ impl KargsConfig {
 }
 
 /// bootc's persistent pull secret.
-const AUTH_FILE: &str = "/var/lib/ostree/auth.json";
+pub const PULL_SECRET: &str = "/var/lib/ostree/auth.json";
+
+/// The link to [`PULL_SECRET`] where bootc reads it, see bootc-secrets(7).
+pub const PULL_SECRET_LINK: &str = "/run/ostree/auth.json";
 
 /// The directory the host keys are in.
 const SSH_HOST_KEY_DIR: &str = "/var/lib/ssh";
@@ -164,16 +167,15 @@ fn check_firstboot(root: &Dir) -> Result<()> {
     {
         return Ok(());
     }
-    let missing: Vec<&str> = FIRSTBOOT_SETTINGS
-        .iter()
-        .filter(|setting| {
-            setting
-                .only_if_exists
-                .is_none_or(|paths| paths.iter().any(|path| root.exists(path)))
-        })
-        .filter(|setting| root.symlink_metadata(setting.file).is_err())
-        .map(|setting| setting.name)
-        .collect();
+    let mut missing = Vec::new();
+    for setting in FIRSTBOOT_SETTINGS {
+        let prompts = setting
+            .only_if_exists
+            .is_none_or(|paths| paths.iter().any(|path| root.exists(path)));
+        if prompts && root.symlink_metadata_optional(setting.file)?.is_none() {
+            missing.push(setting.name);
+        }
+    }
     ensure!(
         missing.is_empty(),
         "systemd-firstboot would prompt for the {} on every boot. help: set them in the image with systemd-firstboot, e.g. `systemd-firstboot --locale=C.UTF-8 --timezone=UTC`, or add {FIRSTBOOT_DISABLED} to kargs.d",
@@ -205,17 +207,18 @@ fn firstboot_disabled(root: &Dir) -> Result<bool> {
 
 /// Make /etc transient in bootc's setup-root configuration.
 fn write_setup_root_conf(root: &Dir) -> Result<()> {
-    if root.exists(SETUP_ROOT_CONF) {
-        let conf = root.read_to_string(SETUP_ROOT_CONF)?;
-        if !conf.trim().is_empty() {
-            let conf: SetupRootConfig =
-                toml::from_str(&conf).with_context(|| format!("parsing /{SETUP_ROOT_CONF}"))?;
-            ensure!(
-                conf.etc.is_transient(),
-                "/{SETUP_ROOT_CONF} does not make /etc transient. help: add `[etc]` with `transient = true` to it"
-            );
-            return Ok(());
-        }
+    let conf = root
+        .as_cap_std()
+        .read_to_string_optional(SETUP_ROOT_CONF)
+        .with_context(|| format!("reading /{SETUP_ROOT_CONF}"))?;
+    if let Some(conf) = conf.filter(|conf| !conf.trim().is_empty()) {
+        let conf: SetupRootConfig =
+            toml::from_str(&conf).with_context(|| format!("parsing /{SETUP_ROOT_CONF}"))?;
+        ensure!(
+            conf.etc.is_transient(),
+            "/{SETUP_ROOT_CONF} does not make /etc transient. help: add `[etc]` with `transient = true`"
+        );
+        return Ok(());
     }
     root.create_dir_all("usr/lib/composefs")?;
     debug!("writing /{SETUP_ROOT_CONF}");
@@ -281,11 +284,12 @@ fn write_tmpfiles(root: &Dir) -> Result<()> {
     let path = format!("{USR_TMPFILES_DIR}/{TMPFILES}");
     root.create_dir_all(USR_TMPFILES_DIR)?;
     debug!("writing /{path}");
-    root.write(
-        &path,
-        format!("{GENERATED_HEADER}\nL /run/ostree/auth.json - - - - {AUTH_FILE}\n"),
-    )
-    .with_context(|| format!("writing /{path}"))
+    let link = Entry::Symlink {
+        path: PULL_SECRET_LINK,
+        target: PULL_SECRET,
+    };
+    root.write(&path, format!("{GENERATED_HEADER}\n{link}\n"))
+        .with_context(|| format!("writing /{path}"))
 }
 
 #[cfg(test)]
