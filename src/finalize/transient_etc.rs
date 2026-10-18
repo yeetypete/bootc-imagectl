@@ -15,7 +15,7 @@
 use std::fmt::Write;
 
 use anyhow::{Context, Result, ensure};
-use cap_std_ext::camino::Utf8Path;
+use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use serde::Deserialize;
@@ -223,6 +223,13 @@ fn write_setup_root_conf(root: &Dir) -> Result<()> {
         .with_context(|| format!("writing /{SETUP_ROOT_CONF}"))
 }
 
+/// The host keys finalize points sshd to with a transient /etc.
+pub fn ssh_host_keys() -> impl Iterator<Item = Utf8PathBuf> {
+    SSH_HOST_KEY_TYPES
+        .iter()
+        .map(|key_type| Utf8Path::new(SSH_HOST_KEY_DIR).join(format!("ssh_host_{key_type}_key")))
+}
+
 /// Point sshd to host keys in /var, generated before sshd starts.
 fn write_ssh_host_keys(root: &Dir) -> Result<()> {
     let config = root.read_to_string("etc/ssh/sshd_config")?;
@@ -233,8 +240,8 @@ fn write_ssh_host_keys(root: &Dir) -> Result<()> {
         "/etc/ssh/sshd_config does not include /etc/ssh/sshd_config.d, where finalize points sshd to the host keys in {SSH_HOST_KEY_DIR}"
     );
     let mut dropin = format!("{GENERATED_HEADER}\n");
-    for key_type in SSH_HOST_KEY_TYPES {
-        let _ = writeln!(dropin, "HostKey {SSH_HOST_KEY_DIR}/ssh_host_{key_type}_key");
+    for key in ssh_host_keys() {
+        let _ = writeln!(dropin, "HostKey {key}");
     }
     root.create_dir_all("etc/ssh/sshd_config.d")?;
     debug!("writing /{SSHD_DROPIN}");
