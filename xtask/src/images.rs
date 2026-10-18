@@ -13,6 +13,9 @@ use minijinja::{Environment, UndefinedBehavior, Value, context};
 /// The extension of template files.
 const TEMPLATE_EXTENSION: &str = "j2";
 
+/// The examples with a transient /etc.
+const TRANSIENT_ETC_EXAMPLES: &[&str] = &[];
+
 /// A variant of every test image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Variant {
@@ -21,14 +24,19 @@ enum Variant {
     /// The image has no regular user. systemd-homed's first boot wizard
     /// creates it.
     Homed,
+    /// [`Self::Homed`] with a transient /etc.
+    TransientEtc,
 }
 
 impl Variant {
-    const ALL: [Self; 2] = [Self::Default, Self::Homed];
+    const ALL: [Self; 3] = [Self::Default, Self::Homed, Self::TransientEtc];
 
     /// The variables the templates see.
     fn context(self) -> Value {
-        context! { homed => self == Self::Homed }
+        context! {
+            homed => self != Self::Default,
+            transient_etc => self == Self::TransientEtc,
+        }
     }
 }
 
@@ -69,12 +77,21 @@ pub(crate) struct Image {
 }
 
 impl Image {
+    /// Whether the image has a transient /etc.
+    pub(crate) fn transient_etc(&self) -> bool {
+        match self.source {
+            Source::Test => self.variant == Variant::TransientEtc,
+            Source::Example => TRANSIENT_ETC_EXAMPLES.contains(&self.name.as_str()),
+        }
+    }
+
     /// The image's tag.
     pub(crate) fn tag(&self) -> String {
         match (self.source, self.variant) {
             (Source::Example, _) => format!("{}-example", self.name),
             (Source::Test, Variant::Default) => self.name.clone(),
             (Source::Test, Variant::Homed) => format!("{}-homed", self.name),
+            (Source::Test, Variant::TransientEtc) => format!("{}-transient-etc", self.name),
         }
     }
 

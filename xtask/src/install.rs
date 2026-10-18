@@ -4,7 +4,7 @@
 //! systemd-vmspawn boots the installed disk.
 
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -19,7 +19,7 @@ use rustix::process::{Pid, Signal, kill_process};
 use serde_json::json;
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
-use xshell::{Shell, cmd};
+use xshell::{Cmd, Shell, cmd};
 
 use crate::{bound_binary, target_dir};
 
@@ -70,11 +70,29 @@ const INSTALLER_CONTAINER: &str = "bootc-imagectl-install";
 /// Name assigned to the systemd-vmspawn VM.
 const MACHINE: &str = "bootc-imagectl-test";
 
+/// The VM's firmware UUID.
+const MACHINE_UUID: &str = "01234567-89ab-cdef-0123-456789abcdef";
+
 /// Install the image onto a fresh disk, boot it and run the test binary in
 /// it over ssh.
-pub(crate) fn run(sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> Result<()> {
+pub(crate) fn run(
+    sh: &Shell,
+    image: &str,
+    transient_etc: bool,
+    binary: &Path,
+    args: &[OsString],
+) -> Result<()> {
     let work = target_dir(binary)?.join("install");
     let disk = install_disk(sh, image, &work, Passphrase::Fixed)?;
+    // With a transient /etc, the tests run on the second boot, to check that
+    // the state of the first boot survived.
+    if transient_etc {
+        let mut vm = Vm::boot(binary, &work, &disk)?;
+        vm.wait_for_ssh(sh)?;
+        vm.wait_for_boot(sh);
+        vm.power_off(sh)?;
+        vm.check_console()?;
+    }
     let mut vm = Vm::boot(binary, &work, &disk)?;
     vm.wait_for_ssh(sh)?;
     vm.run_tests(sh, binary, args)?;
@@ -159,6 +177,7 @@ fn vmspawn(disk: &Path) -> Command {
     command
         .arg(format!("--image={}", disk.display()))
         .arg(format!("--machine={MACHINE}"))
+        .arg(format!("--uuid={MACHINE_UUID}"))
         // The VMs do not need TPM.
         .args(["--ram=4G", "--register=no", "--tpm=no"]);
     command
@@ -310,14 +329,8 @@ impl Vm {
     /// generated.
     fn wait_for_ssh(&mut self, sh: &Shell) -> Result<()> {
         let start = Instant::now();
-        let (options, host) = (&self.ssh_options(), self.ssh_host());
         loop {
-            if cmd!(sh, "ssh {options...} {host} true")
-                .quiet()
-                .ignore_stderr()
-                .run()
-                .is_ok()
-            {
+            if self.ssh(sh, ["true"]).quiet().ignore_stderr().run().is_ok() {
                 return Ok(());
             }
             if let Some(status) = self.vmspawn.try_wait()? {
@@ -338,23 +351,30 @@ impl Vm {
 
     /// Run the test binary in the VM, from the bound target directory.
     fn run_tests(&self, sh: &Shell, binary: &Path, args: &[OsString]) -> Result<()> {
-        let (options, host) = (&self.ssh_options(), self.ssh_host());
         let test = bound_binary(binary, TARGET)?;
         let term = format!("TERM={}", env::var("TERM").unwrap_or_default());
         let filesystem = format!("{FILESYSTEM_ENV}={}", filesystem());
-        cmd!(
-            sh,
-            "ssh {options...} {host} env {term} {filesystem} {test} {args...}"
-        )
-        .run()?;
+        self.ssh(sh, ["env", &term, &filesystem])
+            .arg(test)
+            .args(args)
+            .run()?;
         Ok(())
+    }
+
+    /// Wait for the boot to finish.
+    fn wait_for_boot(&self, sh: &Shell) {
+        let _ = self
+            .ssh(sh, ["systemctl", "is-system-running", "--wait"])
+            .quiet()
+            .ignore_stdout()
+            .run();
     }
 
     /// Power off the installed system and wait for systemd-vmspawn to exit.
     fn power_off(&mut self, sh: &Shell) -> Result<()> {
-        let (options, host) = (&self.ssh_options(), self.ssh_host());
         // ssh may lose the connection before systemctl exits.
-        let _ = cmd!(sh, "ssh {options...} {host} systemctl poweroff")
+        let _ = self
+            .ssh(sh, ["systemctl", "poweroff"])
             .quiet()
             .ignore_stderr()
             .run();
@@ -403,18 +423,19 @@ impl Vm {
         Ok(())
     }
 
-    /// ssh options used to log into the VM.
-    fn ssh_options(&self) -> Vec<OsString> {
-        let mut options = vec!["-i".into(), self.key.clone().into_os_string()];
-        for option in ["BatchMode=yes", "ConnectTimeout=5", "LogLevel=ERROR"] {
-            options.extend(["-o".into(), option.into()]);
-        }
-        options
-    }
-
-    /// The ssh destination of the VM's root account.
-    fn ssh_host(&self) -> String {
-        format!("root@vsock/{}", self.cid)
+    /// Build the ssh command that runs `command` in the VM as root.
+    fn ssh<'a>(
+        &self,
+        sh: &'a Shell,
+        command: impl IntoIterator<Item = impl AsRef<OsStr>>,
+    ) -> Cmd<'a> {
+        let key = &self.key;
+        let host = format!("root@vsock/{}", self.cid);
+        cmd!(
+            sh,
+            "ssh -i {key} -o BatchMode=yes -o ConnectTimeout=5 -o LogLevel=ERROR {host}"
+        )
+        .args(command)
     }
 }
 

@@ -171,11 +171,18 @@ impl Suite {
     }
 
     /// Run the test binary against `image`.
-    fn run(self, sh: &Shell, image: &str, binary: &Path, args: &[OsString]) -> Result<()> {
+    fn run(
+        self,
+        sh: &Shell,
+        image: &images::Image,
+        reference: &str,
+        binary: &Path,
+        args: &[OsString],
+    ) -> Result<()> {
         match self {
-            Self::Container => container::run(sh, image, binary, args),
-            Self::Vm => vm::run(sh, image, binary, args),
-            Self::Install => install::run(sh, image, binary, args),
+            Self::Container => container::run(sh, reference, binary, args),
+            Self::Vm => vm::run(sh, reference, binary, args),
+            Self::Install => install::run(sh, reference, image.transient_etc(), binary, args),
         }
     }
 }
@@ -334,7 +341,7 @@ fn run(
             "never"
         };
         args.push(format!("--color={color}").into());
-        suite.run(sh, &reference, binary, &args)?;
+        suite.run(sh, image, &reference, binary, &args)?;
     }
     Ok(())
 }

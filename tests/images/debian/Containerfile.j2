@@ -95,6 +95,13 @@ RUN systemctl enable systemd-boot-check-no-failures.service
 {% if homed %}
 RUN systemctl enable systemd-homed-firstboot.service
 {% endif %}
+{% if transient_etc %}
+# A transient /etc requires setting the machine ID and systemd-firstboot's
+# settings in the image.
+RUN mkdir -p /usr/lib/bootc/kargs.d && \
+    echo 'kargs = ["systemd.machine_id=firmware"]' > /usr/lib/bootc/kargs.d/10-machine-id.toml && \
+    systemd-firstboot --locale=C.UTF-8
+{% endif %}
 
 LABEL containers.bootc=1
 CMD ["/sbin/init"]
@@ -104,7 +111,7 @@ FROM image AS finalized
 
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts --chunkah-xattrs
+RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts --chunkah-xattrs{% if transient_etc %} --transient-etc{% endif %}
 
 
 # The UKI embeds the kernel and initramfs.
