@@ -93,7 +93,7 @@ jobs:
       packages: write
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.matrix.outputs.matrix).test }}
+      matrix: ${{ fromJSON(needs.matrix.outputs.matrix) }}
     env:
       BOOTC_IMAGECTL_BUILD_OPTIONS: >-
         --cache-from=ghcr.io/${{ github.repository }}/cache-{image}
@@ -151,23 +151,3 @@ jobs:
             target/debug/install/console.log
             target/debug/install/vmspawn.log
             target/debug/install/vm.journal
-
-  prune-cache:
-    needs: [matrix, test-image]
-    # Only delete cache on main.
-    if: ${{ !cancelled() && needs.matrix.result == 'success' && github.ref == 'refs/heads/main' }}
-    name: prune-cache-${{ matrix.cache }}
-    concurrency: prune-cache-${{ matrix.cache }}
-    runs-on: ubuntu-26.04
-    permissions:
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.matrix.outputs.matrix).prune }}
-    steps:
-      - name: Prune build cache
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          package-name: ${{ github.event.repository.name }}/cache-${{ matrix.cache }}
-          package-type: container
-          min-versions-to-keep: 100

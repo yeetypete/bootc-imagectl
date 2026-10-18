@@ -1,6 +1,5 @@
 //! Developer tasks, run with `cargo xtask`.
 
-use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -68,8 +67,7 @@ enum Task {
         /// The example's directory in examples/, e.g. `ubuntu`.
         name: String,
     },
-    /// Print the matrices of the test and cache pruning jobs as JSON,
-    /// consumable by GitHub Actions.
+    /// Print the matrix of test jobs as JSON, consumable by GitHub Actions.
     Matrix,
     /// Run a test binary against each of the suite's images. Cargo runs
     /// this through `test`.
@@ -208,25 +206,14 @@ fn main() -> Result<()> {
     }
 }
 
-/// The GitHub Actions matrices:
-///
-/// 1. The test jobs, one per image.
-/// 2. The jobs pruning the build cache, one per cache package.
+/// The GitHub Actions matrix of test jobs, one per image.
 fn matrix() -> Result<Value> {
-    let images = Suite::Install.images()?;
-    let tests: Vec<Value> = images
+    let tests: Vec<Value> = Suite::Install
+        .images()?
         .iter()
         .map(|image| json!({ "name": format!("test-{}", image.tag()), "image": image.tag() }))
         .collect();
-    let caches: BTreeSet<String> = images.iter().map(images::Image::build_name).collect();
-    let prunes: Vec<Value> = caches
-        .into_iter()
-        .map(|cache| json!({ "cache": cache }))
-        .collect();
-    Ok(json!({
-        "test": { "include": tests },
-        "prune": { "include": prunes },
-    }))
+    Ok(json!({ "include": tests }))
 }
 
 /// Run every suite that tests the image tagged `tag`, the install tests on
