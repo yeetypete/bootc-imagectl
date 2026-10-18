@@ -5,13 +5,13 @@
 Tasks run through [`just`](https://github.com/casey/just):
 
 ```bash
-just check              # Formatting and clippy.
-just test               # Unit tests.
-just test-container     # Container tests.
-just test-vm            # VM tests.
-just test-install       # Install tests.
-just test-image ubuntu  # Every suite against one image.
-just example ubuntu     # Install an example and boot it in a QEMU window.
+just check                   # Formatting and clippy.
+just test                    # Unit tests.
+just test-container          # Container tests.
+just test-vm                 # VM tests.
+just test-install            # Install tests.
+just test-image ubuntu       # Every suite against one image.
+just example ubuntu-desktop  # Install an example and boot it in a QEMU window.
 ```
 
 `bootc-imagectl` uses [prek](https://github.com/j178/prek) (or `pre-commit`)

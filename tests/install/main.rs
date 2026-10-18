@@ -11,5 +11,5 @@ mod fedora_homed;
 mod homed;
 mod status;
 mod ubuntu;
-mod ubuntu_example;
+mod ubuntu_desktop_example;
 mod ubuntu_homed;

@@ -67,7 +67,7 @@ const LAYOUT: &[Entry<'static>] = &[
 ];
 
 /// bootc's setup-root configuration.
-const SETUP_ROOT_CONF: &str = "usr/lib/composefs/setup-root-conf.toml";
+pub(super) const SETUP_ROOT_CONF: &str = "usr/lib/composefs/setup-root-conf.toml";
 
 /// Lay out the toplevel directories and symlinks, and drop the tmpfiles.d
 /// entries that conflict with them.
@@ -118,6 +118,7 @@ fn layout_toplevel(root: &Dir) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::finalize::setup_root;
     use crate::testutil::rootfs;
 
     #[test]
@@ -162,12 +163,10 @@ mod tests {
         layout_toplevel(&root)?;
         assert_eq!(root.read_to_string(SETUP_ROOT_CONF)?, "");
 
-        root.write(SETUP_ROOT_CONF, "[etc]\ntransient = true\n")?;
+        let conf = toml::to_string(&setup_root::Config::TRANSIENT_ETC)?;
+        root.write(SETUP_ROOT_CONF, &conf)?;
         layout_toplevel(&root)?;
-        assert_eq!(
-            root.read_to_string(SETUP_ROOT_CONF)?,
-            "[etc]\ntransient = true\n"
-        );
+        assert_eq!(root.read_to_string(SETUP_ROOT_CONF)?, conf);
         Ok(())
     }
 

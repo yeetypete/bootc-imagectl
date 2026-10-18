@@ -9,6 +9,7 @@ use camino::Utf8PathBuf;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use serde::Deserialize;
+use tracing::debug;
 
 use crate::command::CommandRunExt;
 
@@ -85,6 +86,71 @@ pub(super) fn is_enabled(root: &Dir, unit_files: &[UnitFile], name: &str) -> Res
         EnablementState::Enabled => true,
         _ => dependencies(root, VENDOR_UNIT_DIR)?.contains(name),
     })
+}
+
+/// Write the unit `name` with `content` to [`VENDOR_UNIT_DIR`], and enable it
+/// in `wanted_by`.
+///
+/// # Errors
+///
+/// Fails if the unit or the symlink cannot be written.
+pub(super) fn write_enabled_unit(
+    root: &Dir,
+    name: &str,
+    content: &str,
+    wanted_by: &str,
+) -> Result<()> {
+    write_unit(root, name, content)?;
+    enable(root, name, name, wanted_by)
+}
+
+/// Write the template unit `template`, e.g. `foo@.service`, with `content` to
+/// [`VENDOR_UNIT_DIR`], and enable each of its `instances` in `wanted_by`.
+///
+/// # Errors
+///
+/// Fails if the unit or a symlink cannot be written.
+pub(super) fn write_enabled_template(
+    root: &Dir,
+    template: &str,
+    content: &str,
+    instances: &[&str],
+    wanted_by: &str,
+) -> Result<()> {
+    let (prefix, suffix) = template
+        .split_once("@.")
+        .with_context(|| format!("{template} is not a template unit"))?;
+    write_unit(root, template, content)?;
+    for instance in instances {
+        enable(
+            root,
+            template,
+            &format!("{prefix}@{instance}.{suffix}"),
+            wanted_by,
+        )?;
+    }
+    Ok(())
+}
+
+/// Write the unit `name` with `content` to [`VENDOR_UNIT_DIR`].
+fn write_unit(root: &Dir, name: &str, content: &str) -> Result<()> {
+    root.create_dir_all(VENDOR_UNIT_DIR)
+        .with_context(|| format!("creating /{VENDOR_UNIT_DIR}"))?;
+    let unit = format!("{VENDOR_UNIT_DIR}/{name}");
+    debug!("writing /{unit}");
+    root.atomic_write(&unit, content)
+        .with_context(|| format!("writing /{unit}"))
+}
+
+/// Enable the unit file `unit` as `name` in `wanted_by`.
+fn enable(root: &Dir, unit: &str, name: &str, wanted_by: &str) -> Result<()> {
+    let wants = format!("{VENDOR_UNIT_DIR}/{wanted_by}.wants");
+    root.create_dir_all(&wants)
+        .with_context(|| format!("creating /{wants}"))?;
+    let link = format!("{wants}/{name}");
+    root.remove_file_optional(&link)?;
+    root.symlink(format!("../{unit}"), &link)
+        .with_context(|| format!("enabling {name} in /{wants}"))
 }
 
 /// A unit name, as systemd.unit(5) defines it.

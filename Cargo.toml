@@ -59,6 +59,7 @@ rustix = { version = "1", features = ["mount", "process", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
 tempfile = "3"
+toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uzers = { version = "0.12", default-features = false, features = ["cache"] }

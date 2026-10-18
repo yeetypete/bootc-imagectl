@@ -43,8 +43,9 @@ is built:
 
 ## Building an image
 
-See [`examples/ubuntu/Containerfile`](examples/ubuntu/Containerfile) for a
-complete example.
+See
+[`examples/ubuntu-desktop/Containerfile`](examples/ubuntu-desktop/Containerfile)
+for a complete example.
 
 On a first build, `finalize` will fail and print the lines the sysusers lock
 file must contain. Add them to `00-bootc-imagectl.lock.conf`, commit it next to
@@ -105,6 +106,33 @@ installed:
 ```bash
 sudo systemd-cryptenroll --tpm2-device=auto /dev/my-disk
 ```
+
+### Transient `/etc`
+
+`finalize --transient-etc` makes bootc discard changes to `/etc` on every
+boot. [bootc recommends](https://bootc.dev/bootc/bootc-filesystem.7.html#etc) this
+configuration where machines need no local configuration in `/etc`.
+
+> [!WARNING]
+> Transient `/etc` is unlikely to work well on desktop images. Settings changed
+at runtime, such as Wi-Fi networks, time zone or printers, would be lost on reboot.
+
+With this flag set `finalize` will automatically relocate state that must
+survive a reboot to `/var`:
+
+- sshd's host keys are generated in `/var/lib/ssh`.
+- bootc's pull secret is linked from `/run/ostree/auth.json` to
+  `/var/lib/ostree/auth.json`.
+
+> [!IMPORTANT]
+> By default the machine ID (stored in `/etc/machine-id`) is not persistent.
+> systemd generates a new one on every boot. To keep it stable, set it in the
+> image, e.g. from the firmware:
+>
+> ```toml
+> # /usr/lib/bootc/kargs.d/10-machine-id.toml
+> kargs = ["systemd.machine_id=firmware"]
+> ```
 
 ## Updates
 
