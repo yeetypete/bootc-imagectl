@@ -1,12 +1,37 @@
 //! Kernel arguments required in all images.
 
 use anyhow::{Context, Result};
+use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs_utf8::Dir;
+use serde::Deserialize;
 
 use super::GENERATED_HEADER;
 
 /// The kargs.d directory, relative to the rootfs.
 pub(super) const KARGS_DIR: &str = "usr/lib/bootc/kargs.d";
+
+/// A kargs.d file, see bootc-kernel-arguments(7).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub(super) struct Config {
+    pub(super) kargs: Vec<String>,
+    /// If set, bootc applies the file only on these architectures.
+    match_architectures: Option<Vec<String>>,
+}
+
+impl Config {
+    /// Whether bootc reads the kargs.d file `name`.
+    pub(super) fn filename_matches(name: &str) -> bool {
+        Utf8Path::new(name).extension() == Some("toml")
+    }
+
+    /// Whether bootc applies the file on the architecture finalize runs on.
+    pub(super) fn matches_architecture(&self) -> bool {
+        self.match_architectures
+            .as_ref()
+            .is_none_or(|archs| archs.iter().any(|arch| arch == std::env::consts::ARCH))
+    }
+}
 
 /// The kargs.d file.
 const KARGS_FILE: &str = "10-bootc-imagectl.toml";

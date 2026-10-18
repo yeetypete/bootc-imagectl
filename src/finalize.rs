@@ -23,6 +23,7 @@ mod initramfs;
 mod kargs;
 mod layout;
 mod presets;
+mod setup_root;
 mod systemd;
 mod tmpfiles;
 mod transient_etc;

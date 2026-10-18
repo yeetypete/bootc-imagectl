@@ -18,72 +18,14 @@ use anyhow::{Context, Result, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
-use serde::Deserialize;
 use tracing::debug;
 
 use super::GENERATED_HEADER;
-use super::kargs::KARGS_DIR;
+use super::kargs::{self, KARGS_DIR};
 use super::layout::SETUP_ROOT_CONF;
+use super::setup_root;
 use super::tmpfiles::{Entry, USR_TMPFILES_DIR};
 use super::units::{self, VENDOR_UNIT_DIR};
-
-/// The setup-root configuration that makes /etc transient.
-const SETUP_ROOT_TRANSIENT_ETC: &str = "[etc]\ntransient = true\n";
-
-/// The part of bootc's setup-root configuration that mounts /etc, see
-/// bootc-setup-root-conf(5).
-#[derive(Debug, Default, Deserialize)]
-struct SetupRootConfig {
-    #[serde(default)]
-    etc: MountConfig,
-}
-
-/// How bootc mounts a directory.
-#[derive(Debug, Default, Deserialize)]
-struct MountConfig {
-    mount: Option<MountType>,
-    #[serde(default)]
-    transient: bool,
-}
-
-impl MountConfig {
-    /// Whether bootc mounts the directory transient. `mount` takes precedence
-    /// over the `transient` shorthand.
-    fn is_transient(&self) -> bool {
-        self.mount
-            .map_or(self.transient, |mount| mount == MountType::Transient)
-    }
-}
-
-/// The types of mounts bootc supports.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum MountType {
-    #[serde(alias = "root")]
-    None,
-    Bind,
-    Overlay,
-    #[serde(alias = "volatile")]
-    Transient,
-}
-
-/// A kargs.d file, see bootc-kernel-arguments(7).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-struct KargsConfig {
-    kargs: Vec<String>,
-    /// If set, bootc applies the file only on these architectures.
-    match_architectures: Option<Vec<String>>,
-}
-
-impl KargsConfig {
-    /// Whether bootc applies the file on the architecture finalize runs on.
-    fn matches_architecture(&self) -> bool {
-        self.match_architectures
-            .as_ref()
-            .is_none_or(|archs| archs.iter().any(|arch| arch == std::env::consts::ARCH))
-    }
-}
 
 /// bootc's persistent pull secret.
 pub const PULL_SECRET: &str = "/var/lib/ostree/auth.json";
@@ -191,10 +133,10 @@ fn firstboot_disabled(root: &Dir) -> Result<bool> {
     };
     for entry in dir.entries()? {
         let name = entry?.file_name()?;
-        if Utf8Path::new(&name).extension() != Some("toml") {
+        if !kargs::Config::filename_matches(&name) {
             continue;
         }
-        let config: KargsConfig = toml::from_str(&dir.read_to_string(&name)?)
+        let config: kargs::Config = toml::from_str(&dir.read_to_string(&name)?)
             .with_context(|| format!("parsing /{KARGS_DIR}/{name}"))?;
         if config.matches_architecture()
             && config.kargs.iter().any(|karg| karg == FIRSTBOOT_DISABLED)
@@ -212,7 +154,7 @@ fn write_setup_root_conf(root: &Dir) -> Result<()> {
         .read_to_string_optional(SETUP_ROOT_CONF)
         .with_context(|| format!("reading /{SETUP_ROOT_CONF}"))?;
     if let Some(conf) = conf.filter(|conf| !conf.trim().is_empty()) {
-        let conf: SetupRootConfig =
+        let conf: setup_root::Config =
             toml::from_str(&conf).with_context(|| format!("parsing /{SETUP_ROOT_CONF}"))?;
         ensure!(
             conf.etc.is_transient(),
@@ -222,8 +164,11 @@ fn write_setup_root_conf(root: &Dir) -> Result<()> {
     }
     root.create_dir_all("usr/lib/composefs")?;
     debug!("writing /{SETUP_ROOT_CONF}");
-    root.write(SETUP_ROOT_CONF, SETUP_ROOT_TRANSIENT_ETC)
-        .with_context(|| format!("writing /{SETUP_ROOT_CONF}"))
+    root.write(
+        SETUP_ROOT_CONF,
+        toml::to_string(&setup_root::Config::TRANSIENT_ETC)?,
+    )
+    .with_context(|| format!("writing /{SETUP_ROOT_CONF}"))
 }
 
 /// The host keys finalize points sshd to with a transient /etc.
@@ -344,10 +289,8 @@ mod tests {
     fn makes_etc_transient() -> Result<()> {
         let root = rootfs()?;
         write_setup_root_conf(&root)?;
-        assert_eq!(
-            root.read_to_string(SETUP_ROOT_CONF)?,
-            SETUP_ROOT_TRANSIENT_ETC
-        );
+        let conf: setup_root::Config = toml::from_str(&root.read_to_string(SETUP_ROOT_CONF)?)?;
+        assert!(conf.etc.is_transient());
         // Again, as on a rerun.
         write_setup_root_conf(&root)?;
         Ok(())
