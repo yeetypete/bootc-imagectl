@@ -24,9 +24,9 @@ impl Config {
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub(super) struct MountConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    mount: Option<MountType>,
+    pub(super) mount: Option<MountType>,
     #[serde(default)]
-    transient: bool,
+    pub(super) transient: bool,
 }
 
 impl MountConfig {
@@ -41,7 +41,7 @@ impl MountConfig {
 /// The types of mounts bootc supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum MountType {
+pub(super) enum MountType {
     #[serde(alias = "root")]
     None,
     Bind,

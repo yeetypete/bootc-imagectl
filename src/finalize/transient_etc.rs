@@ -278,9 +278,13 @@ mod tests {
     fn accepts_disabled_firstboot_prompts() -> Result<()> {
         let root = firstboot_image(&[])?;
         root.create_dir_all(KARGS_DIR)?;
+        let config = kargs::Config {
+            kargs: vec![FIRSTBOOT_DISABLED.to_owned()],
+            match_architectures: None,
+        };
         root.write(
             format!("{KARGS_DIR}/10-firstboot.toml"),
-            "kargs = [\"systemd.firstboot=no\"]\n",
+            toml::to_string(&config)?,
         )?;
         check_firstboot(&root)
     }
@@ -300,12 +304,20 @@ mod tests {
     fn keeps_image_setup_root_conf_with_transient_etc() -> Result<()> {
         let root = rootfs()?;
         root.create_dir_all("usr/lib/composefs")?;
-        let conf = "[root]\ntransient = true\n\n[etc]\nmount = \"transient\"\n";
-        root.write(SETUP_ROOT_CONF, conf)?;
+        let conf = toml::to_string(&setup_root::Config {
+            etc: setup_root::MountConfig {
+                mount: Some(setup_root::MountType::Transient),
+                transient: false,
+            },
+        })?;
+        root.write(SETUP_ROOT_CONF, &conf)?;
         write_setup_root_conf(&root)?;
         assert_eq!(root.read_to_string(SETUP_ROOT_CONF)?, conf);
 
-        root.write(SETUP_ROOT_CONF, "[root]\ntransient = true\n")?;
+        root.write(
+            SETUP_ROOT_CONF,
+            toml::to_string(&setup_root::Config::default())?,
+        )?;
         assert!(write_setup_root_conf(&root).is_err());
         Ok(())
     }
