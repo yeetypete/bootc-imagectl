@@ -120,19 +120,21 @@ at runtime, such as Wi-Fi networks, time zone or printers, would be lost on rebo
 With this flag set `finalize` will automatically relocate state that must
 survive a reboot to `/var`:
 
+- The machine ID generated on the first boot is kept in
+  `/var/lib/dbus/machine-id`, which systemd reads when `/etc/machine-id` is
+  uninitialized (see [machine-id(5)](https://www.freedesktop.org/software/systemd/man/latest/machine-id.html)).
 - sshd's host keys are generated in `/var/lib/ssh`.
 - bootc's pull secret is linked from `/run/ostree/auth.json` to
   `/var/lib/ostree/auth.json`.
 
-> [!IMPORTANT]
-> By default the machine ID (stored in `/etc/machine-id`) is not persistent.
-> systemd generates a new one on every boot. To keep it stable, set it in the
-> image, e.g. from the firmware:
->
-> ```toml
-> # /usr/lib/bootc/kargs.d/10-machine-id.toml
-> kargs = ["systemd.machine_id=firmware"]
-> ```
+To derive the first boot's machine ID from the firmware's UUID instead of
+generating a random one, set `systemd.machine_id=firmware` (systemd 257 or
+newer) in kargs.d. Only do this if the hardware reports a unique product UUID:
+
+```toml
+# /usr/lib/bootc/kargs.d/10-machine-id.toml
+kargs = ["systemd.machine_id=firmware"]
+```
 
 ## Updates
 

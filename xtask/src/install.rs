@@ -70,9 +70,6 @@ const INSTALLER_CONTAINER: &str = "bootc-imagectl-install";
 /// Name assigned to the systemd-vmspawn VM.
 const MACHINE: &str = "bootc-imagectl-test";
 
-/// The VM's firmware UUID.
-const MACHINE_UUID: &str = "01234567-89ab-cdef-0123-456789abcdef";
-
 /// Install the image onto a fresh disk, boot it and run the test binary in
 /// it over ssh.
 pub(crate) fn run(
@@ -177,7 +174,6 @@ fn vmspawn(disk: &Path) -> Command {
     command
         .arg(format!("--image={}", disk.display()))
         .arg(format!("--machine={MACHINE}"))
-        .arg(format!("--uuid={MACHINE_UUID}"))
         // The VMs do not need TPM.
         .args(["--ram=4G", "--register=no", "--tpm=no"]);
     command

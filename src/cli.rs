@@ -59,9 +59,8 @@ pub struct FinalizeOpts {
     #[arg(long)]
     pub chunkah_xattrs: bool,
 
-    /// Make /etc transient, discarding changes to it on every boot. The image
-    /// must set the machine ID, e.g. with `systemd.machine_id=firmware` in
-    /// kargs.d.
+    /// Make /etc transient, discarding changes to it on every boot. The machine
+    /// ID, sshd's host keys and bootc's pull secret are kept in /var.
     #[arg(long)]
     pub transient_etc: bool,
 }
