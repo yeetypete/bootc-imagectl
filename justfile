@@ -29,6 +29,10 @@ vm image *args:
 test-install *args:
     cargo xtask test install {{ args }}
 
+# Run every suite against one image.
+test-image image *args:
+    cargo xtask test-image {{ args }} {{ image }}
+
 # Install an example image and boot it in a VM with a graphical console.
 example name *args:
     cargo xtask example {{ args }} {{ name }}
