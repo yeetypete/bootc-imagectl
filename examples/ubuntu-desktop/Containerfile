@@ -111,12 +111,11 @@ CMD ["/sbin/init"]
 
 FROM image AS finalized
 
-# The directory holding bootc-imagectl and one holding the Secure Boot
-# certificate are passed as the bootc-imagectl and secureboot build contexts,
-# the key as the secureboot_key secret, see the build steps above the uki stage.
+# The directory holding bootc-imagectl is passed as the bootc-imagectl build
+# context, see the build steps above the uki stage.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-# finalize signs systemd-boot and stages the certificate for enrollment.
-# The certificate is bind-mounted so a new key invalidates the cache.
+# The Secure Boot key is passed as a secret, and its certificate as the
+# secureboot build context.
 RUN --network=none \
     --mount=type=secret,id=secureboot_key \
     --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \

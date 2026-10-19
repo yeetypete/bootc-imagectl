@@ -210,14 +210,7 @@ impl Suite {
         match self {
             Self::Container => container::run(sh, reference, binary, args),
             Self::Vm => vm::run(sh, reference, binary, args),
-            Self::Install => install::run(
-                sh,
-                reference,
-                image.transient_etc(),
-                image.secure_boot(),
-                binary,
-                args,
-            ),
+            Self::Install => install::run(sh, image, reference, binary, args),
         }
     }
 }
@@ -409,7 +402,7 @@ fn example(sh: &Shell, build: &Build, name: &str) -> Result<()> {
     let reference = build_image(sh, build, image, &target)?;
     let work = target.join("example");
     let disk = install::install_disk(sh, &reference, &work, install::Passphrase::Prompt)?;
-    install::boot_gui(sh, &disk, image.secure_boot())
+    install::boot_gui(sh, image, &disk)
 }
 
 /// Render `image` into `target`, build it and return its reference.

@@ -10,12 +10,13 @@ use std::process::Command;
 use anyhow::{Context, Result, bail, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::ambient_authority;
-use cap_std_ext::cap_std::fs_utf8::{Dir, Permissions, PermissionsExt};
+use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use tracing::{debug, info};
 
-use super::systemd;
+use crate::cli::SecureBootOpts;
 use crate::command::CommandRunExt;
+use crate::fs::copy_dir;
 
 /// The oldest systemd whose bootctl supports `--secure-boot-auto-enroll`.
 const MIN_VERSION: u32 = 257;
@@ -30,23 +31,20 @@ const SBSIGN: &str = "usr/lib/systemd/systemd-sbsign";
 /// Where bootc copies the keys to the ESP from.
 const KEYS_DIR: &str = "usr/lib/bootc/install/secureboot-keys/auto";
 
-/// The keys, as bootctl names them on the ESP.
-const KEYS: [&str; 3] = ["PK.auth", "KEK.auth", "db.auth"];
-
-/// Sign systemd-boot with `key` and stage `cert` for enrollment.
+/// Sign systemd-boot and stage the certificate for enrollment, given the
+/// image's systemd version.
 ///
 /// # Errors
 ///
 /// Fails if the image's systemd is too old, the image lacks systemd-boot or
 /// the signing tool, or signing fails.
-pub(super) fn finalize(root: &Dir, key: &Utf8Path, cert: &Utf8Path) -> Result<()> {
-    let version = systemd::version()?;
+pub(super) fn finalize(root: &Dir, opts: &SecureBootOpts, systemd: u32) -> Result<()> {
     ensure!(
-        version >= MIN_VERSION,
-        "the image has systemd {version} but Secure Boot needs systemd {MIN_VERSION} or newer"
+        systemd >= MIN_VERSION,
+        "the image has systemd {systemd} but Secure Boot needs systemd {MIN_VERSION} or newer"
     );
-    sign_systemd_boot(root, key, cert)?;
-    write_keys(root, key, cert)
+    sign_systemd_boot(root, &opts.private_key, &opts.certificate)?;
+    write_keys(root, &opts.private_key, &opts.certificate)
 }
 
 /// The paths of systemd-boot's EFI binaries, one per architecture,
@@ -68,8 +66,8 @@ fn systemd_boot_binaries(root: &Dir) -> Result<Vec<Utf8PathBuf>> {
     Ok(paths)
 }
 
-/// Write a signed copy of each systemd-boot binary next to it. A signed copy,
-/// if shipped by the distro package is replaced.
+/// Write a signed copy of each systemd-boot binary next to it, replacing one
+/// a package shipped.
 fn sign_systemd_boot(root: &Dir, key: &Utf8Path, cert: &Utf8Path) -> Result<()> {
     ensure!(
         root.is_file(SBSIGN),
@@ -122,12 +120,8 @@ fn write_keys(root: &Dir, key: &Utf8Path, cert: &Utf8Path) -> Result<()> {
         .context("opening the keys bootctl wrote")?;
     root.create_dir_all(KEYS_DIR)
         .with_context(|| format!("creating /{KEYS_DIR}"))?;
-    let to = root.open_dir(KEYS_DIR)?;
-    for name in KEYS {
-        from.copy(name, &to, name)
-            .with_context(|| format!("copying {name} to /{KEYS_DIR}"))?;
-        to.set_permissions(name, Permissions::from_mode(0o644))?;
-    }
+    copy_dir(&from, &root.open_dir(KEYS_DIR)?)
+        .with_context(|| format!("copying the keys to /{KEYS_DIR}"))?;
     info!("wrote the Secure Boot keys to /{KEYS_DIR}");
     Ok(())
 }

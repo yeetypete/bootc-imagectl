@@ -69,8 +69,8 @@ FROM image AS finalized
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
 {% if secureboot %}
-# finalize signs systemd-boot and stages the certificate for enrollment.
-# The certificate is bind-mounted so a new key invalidates the cache.
+# The Secure Boot key is passed as a secret, and its certificate as the
+# secureboot build context.
 RUN --mount=type=secret,id=secureboot_key \
     --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
     /usr/libexec/bootc-imagectl finalize \

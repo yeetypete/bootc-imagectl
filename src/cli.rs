@@ -64,14 +64,22 @@ pub struct FinalizeOpts {
     #[arg(long)]
     pub transient_etc: bool,
 
+    #[command(flatten)]
+    pub secure_boot: Option<SecureBootOpts>,
+}
+
+/// Options that sign the image for Secure Boot.
+#[derive(Debug, Args)]
+#[group(multiple = true, requires_all = ["private_key", "certificate"])]
+pub struct SecureBootOpts {
     /// The private key that signs for Secure Boot, in PEM form, e.g.
     /// `/run/secrets/secureboot_key` from a build secret.
-    #[arg(long, value_name = "PATH", requires = "secureboot_certificate")]
-    pub secureboot_private_key: Option<Utf8PathBuf>,
+    #[arg(long = "secureboot-private-key", value_name = "PATH", required = false)]
+    pub private_key: Utf8PathBuf,
 
     /// The certificate of --secureboot-private-key, in PEM form.
-    #[arg(long, value_name = "PATH", requires = "secureboot_private_key")]
-    pub secureboot_certificate: Option<Utf8PathBuf>,
+    #[arg(long = "secureboot-certificate", value_name = "PATH", required = false)]
+    pub certificate: Utf8PathBuf,
 }
 
 /// Options for `install`.
