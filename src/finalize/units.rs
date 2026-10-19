@@ -104,34 +104,6 @@ pub(super) fn write_enabled_unit(
     enable(root, name, name, wanted_by)
 }
 
-/// Write the template unit `template`, e.g. `foo@.service`, with `content` to
-/// [`VENDOR_UNIT_DIR`], and enable each of its `instances` in `wanted_by`.
-///
-/// # Errors
-///
-/// Fails if the unit or a symlink cannot be written.
-pub(super) fn write_enabled_template(
-    root: &Dir,
-    template: &str,
-    content: &str,
-    instances: &[&str],
-    wanted_by: &str,
-) -> Result<()> {
-    let (prefix, suffix) = template
-        .split_once("@.")
-        .with_context(|| format!("{template} is not a template unit"))?;
-    write_unit(root, template, content)?;
-    for instance in instances {
-        enable(
-            root,
-            template,
-            &format!("{prefix}@{instance}.{suffix}"),
-            wanted_by,
-        )?;
-    }
-    Ok(())
-}
-
 /// Write the unit `name` with `content` to [`VENDOR_UNIT_DIR`].
 fn write_unit(root: &Dir, name: &str, content: &str) -> Result<()> {
     root.create_dir_all(VENDOR_UNIT_DIR)

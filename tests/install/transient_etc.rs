@@ -6,9 +6,9 @@ use std::process::Command;
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::finalize::{DBUS_MACHINE_ID, PULL_SECRET, PULL_SECRET_LINK, ssh_host_keys};
+use bootc_imagectl::finalize::{DBUS_MACHINE_ID, PULL_SECRET, PULL_SECRET_LINK, SSH_HOST_KEY_DIR};
 use bootc_imagectl::testing::{boot_time, written_before_boot};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 
 use crate::homed::user_record;
 
@@ -50,25 +50,22 @@ pub(crate) fn persists_machine_id_in_var() -> Result<()> {
     Ok(())
 }
 
-/// sshd uses the host keys in /var from the first boot, which /etc/ssh links
-/// to.
+/// Every host key sshd loads links to one in /var from the first boot.
 pub(crate) fn keeps_ssh_host_keys() -> Result<()> {
-    let keys: Vec<Utf8PathBuf> = ssh_host_keys().collect();
     let config = Command::new("sshd").arg("-T").output_string()?;
-    let mut loaded = config
+    let keys: Vec<&Utf8Path> = config
         .lines()
         .filter_map(|line| line.split_once(' '))
         // Newer OpenSSH prints the keywords in camel case.
         .filter(|(keyword, _)| keyword.eq_ignore_ascii_case("hostkey"))
-        .map(|(_, path)| Utf8Path::new(path).canonicalize_utf8())
-        .collect::<Result<Vec<_>, _>>()?;
-    loaded.sort();
-    assert_eq!(loaded, keys);
-    for key in &keys {
-        assert!(written_before_boot(key.as_std_path())?, "{key}");
-        for target in [key.clone(), key.with_extension("pub")] {
-            let link = Utf8Path::new("/etc/ssh").join(target.file_name().unwrap());
+        .map(|(_, path)| Utf8Path::new(path))
+        .collect();
+    assert!(!keys.is_empty());
+    for key in keys {
+        for link in [key.to_owned(), key.with_extension("pub")] {
+            let target = Utf8Path::new(SSH_HOST_KEY_DIR).join(link.file_name().unwrap());
             assert_eq!(fs::read_link(&link)?, target.as_std_path(), "{link}");
+            assert!(written_before_boot(target.as_std_path())?, "{target}");
         }
     }
     Ok(())
