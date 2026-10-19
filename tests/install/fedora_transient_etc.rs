@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::{homed, status, transient_etc};
+use crate::{homed, secureboot, status, transient_etc};
 
 #[test]
 fn updates_from_target_imgref() -> Result<()> {
@@ -47,4 +47,10 @@ fn keeps_ssh_host_keys() -> Result<()> {
 #[test]
 fn links_pull_secret() -> Result<()> {
     transient_etc::links_pull_secret()
+}
+
+#[test]
+fn boots_without_secure_boot() -> Result<()> {
+    assert!(!secureboot::enabled()?);
+    Ok(())
 }

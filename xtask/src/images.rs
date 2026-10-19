@@ -16,6 +16,9 @@ const TEMPLATE_EXTENSION: &str = "j2";
 /// The examples with a transient /etc.
 const TRANSIENT_ETC_EXAMPLES: &[&str] = &["ubuntu-transient-etc"];
 
+/// The examples signed for Secure Boot.
+const SECURE_BOOT_EXAMPLES: &[&str] = &["ubuntu-desktop"];
+
 /// A variant of every test image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Variant {
@@ -26,16 +29,24 @@ enum Variant {
     Homed,
     /// [`Self::Homed`] with a transient /etc.
     TransientEtc,
+    /// The image is signed for Secure Boot.
+    SecureBoot,
 }
 
 impl Variant {
-    const ALL: [Self; 3] = [Self::Default, Self::Homed, Self::TransientEtc];
+    const ALL: [Self; 4] = [
+        Self::Default,
+        Self::Homed,
+        Self::TransientEtc,
+        Self::SecureBoot,
+    ];
 
     /// The variables the templates see.
     fn context(self) -> Value {
         context! {
-            homed => self != Self::Default,
+            homed => matches!(self, Self::Homed | Self::TransientEtc),
             transient_etc => self == Self::TransientEtc,
+            secureboot => self == Self::SecureBoot,
         }
     }
 }
@@ -45,7 +56,7 @@ impl Variant {
 pub(crate) enum Source {
     /// A test image in tests/images, built once per variant.
     Test,
-    /// An example in examples/, built as is.
+    /// An example in examples/.
     Example,
 }
 
@@ -92,6 +103,7 @@ impl Image {
             (Source::Test, Variant::Default) => self.name.clone(),
             (Source::Test, Variant::Homed) => format!("{}-homed", self.name),
             (Source::Test, Variant::TransientEtc) => format!("{}-transient-etc", self.name),
+            (Source::Test, Variant::SecureBoot) => format!("{}-secureboot", self.name),
         }
     }
 
@@ -100,6 +112,14 @@ impl Image {
         match self.source {
             Source::Test => self.name.clone(),
             Source::Example => self.tag(),
+        }
+    }
+
+    /// Whether the image is signed for Secure Boot.
+    pub(crate) fn secure_boot(&self) -> bool {
+        match self.source {
+            Source::Test => self.variant == Variant::SecureBoot,
+            Source::Example => SECURE_BOOT_EXAMPLES.contains(&self.name.as_str()),
         }
     }
 

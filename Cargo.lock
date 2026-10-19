@@ -1250,6 +1250,7 @@ dependencies = [
  "minijinja",
  "rand 0.10.3",
  "rustix",
+ "serde",
  "serde_json",
  "signal-hook",
  "xshell",
