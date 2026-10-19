@@ -16,7 +16,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use rustix::process::{Pid, Signal, kill_process};
-use serde_json::{Value, json};
+use serde::Deserialize;
+use serde_json::json;
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use xshell::{Cmd, Shell, cmd};
@@ -76,17 +77,18 @@ const MACHINE: &str = "bootc-imagectl-test";
 pub(crate) fn run(sh: &Shell, image: &Image, binary: &Path, args: &[OsString]) -> Result<()> {
     let work = target_dir(binary)?.join("install");
     let disk = install_disk(sh, &image.reference(), &work, Passphrase::Fixed)?;
+    let firmware = firmware(sh, image)?;
     // With a transient /etc, the tests run on the second boot, to check that
     // the state of the first boot survived.
     if image.has_transient_etc() {
-        let mut vm = Vm::boot(sh, image.has_secure_boot(), binary, &work, &disk)?;
+        let mut vm = Vm::boot(binary, &work, &disk, &firmware)?;
         vm.wait_for_ssh(sh)?;
         let systemd = vm.systemd_version(sh)?;
         vm.wait_for_boot(sh);
         vm.power_off(sh)?;
         vm.check_console(systemd)?;
     }
-    let mut vm = Vm::boot(sh, image.has_secure_boot(), binary, &work, &disk)?;
+    let mut vm = Vm::boot(binary, &work, &disk, &firmware)?;
     vm.wait_for_ssh(sh)?;
     let systemd = vm.systemd_version(sh)?;
     vm.run_tests(sh, image, binary, args)?;
@@ -132,8 +134,8 @@ pub(crate) fn install_disk(
 
 /// Boot the installed disk in a VM with a graphical console, and wait for
 /// it to power off. The boot will prompt for the disk's passphrase.
-pub(crate) fn boot_gui(sh: &Shell, disk: &Path, secure_boot: bool) -> Result<()> {
-    let firmware = firmware(sh, secure_boot)?;
+pub(crate) fn boot_gui(sh: &Shell, image: &Image, disk: &Path) -> Result<()> {
+    let firmware = firmware(sh, image)?;
     // Registered before systemd-vmspawn starts, so no Ctrl-C is lost.
     let mut signals = Signals::new([SIGINT, SIGTERM])?;
     let mut vmspawn = vmspawn(disk)
@@ -190,14 +192,43 @@ fn vmspawn_error(e: io::Error) -> anyhow::Error {
     }
 }
 
-/// The systemd-vmspawn firmware option. A signed image enrolls its keys and
-/// boots with Secure Boot on.
-fn firmware(sh: &Shell, secure_boot: bool) -> Result<String> {
-    Ok(if secure_boot {
+/// The systemd-vmspawn firmware option for `image`. A signed image enrolls
+/// its keys and boots with Secure Boot on.
+fn firmware(sh: &Shell, image: &Image) -> Result<String> {
+    Ok(if image.has_secure_boot() {
         format!("--firmware={}", setup_mode_firmware(sh)?.display())
     } else {
         "--secure-boot=no".into()
     })
+}
+
+/// A QEMU firmware descriptor, see firmware.json in QEMU's interop docs.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct FirmwareDescriptor {
+    interface_types: Vec<String>,
+    targets: Vec<FirmwareTarget>,
+    features: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FirmwareTarget {
+    architecture: String,
+}
+
+impl FirmwareDescriptor {
+    /// Whether the firmware is UEFI for this machine, with Secure Boot in
+    /// setup mode, i.e. without enrolled keys.
+    fn is_setup_mode(&self) -> bool {
+        let has = |feature: &str| self.features.iter().any(|f| f == feature);
+        self.interface_types.iter().any(|t| t == "uefi")
+            && self
+                .targets
+                .iter()
+                .any(|t| t.architecture == env::consts::ARCH)
+            && has("secure-boot")
+            && !has("enrolled-keys")
+    }
 }
 
 /// A firmware descriptor systemd-vmspawn finds for Secure Boot in setup
@@ -205,23 +236,9 @@ fn firmware(sh: &Shell, secure_boot: bool) -> Result<String> {
 fn setup_mode_firmware(sh: &Shell) -> Result<PathBuf> {
     let list = cmd!(sh, "systemd-vmspawn --firmware=list").quiet().read()?;
     for path in list.lines().map(PathBuf::from) {
-        let descriptor: Value = serde_json::from_slice(&fs::read(&path)?)
+        let descriptor: FirmwareDescriptor = serde_json::from_slice(&fs::read(&path)?)
             .with_context(|| format!("parsing {}", path.display()))?;
-        let has = |key: &str, value: &str| {
-            descriptor[key]
-                .as_array()
-                .is_some_and(|values| values.iter().any(|v| v == value))
-        };
-        let for_arch = descriptor["targets"].as_array().is_some_and(|targets| {
-            targets
-                .iter()
-                .any(|target| target["architecture"] == env::consts::ARCH)
-        });
-        if for_arch
-            && has("interface-types", "uefi")
-            && has("features", "secure-boot")
-            && !has("features", "enrolled-keys")
-        {
+        if descriptor.is_setup_mode() {
             return Ok(path);
         }
     }
@@ -320,13 +337,7 @@ struct Vm {
 }
 
 impl Vm {
-    fn boot(
-        sh: &Shell,
-        secure_boot: bool,
-        binary: &Path,
-        work: &Path,
-        disk: &Path,
-    ) -> Result<Self> {
+    fn boot(binary: &Path, work: &Path, disk: &Path, firmware: &str) -> Result<Self> {
         // Short, since systemd-vmspawn creates sockets in it.
         let runtime_dir =
             Path::new(&env::var_os("XDG_RUNTIME_DIR").context("XDG_RUNTIME_DIR is not set")?)
@@ -338,7 +349,6 @@ impl Vm {
         fs::create_dir(&runtime_dir)?;
 
         let journal = work.join("vm.journal");
-        let firmware = firmware(sh, secure_boot)?;
         let cid = random_cid();
         let vmspawn = vmspawn(disk)
             .env("RUNTIME_DIRECTORY", &runtime_dir)
