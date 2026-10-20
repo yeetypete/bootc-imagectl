@@ -392,7 +392,11 @@ fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) 
         format!("--build-context=chunked=container-image://{chunked}"),
         format!("--tag={reference}"),
     ];
-    build.build(sh, &name, &dir, target, &args)?;
+    // podman pushes even locally cached steps to --cache-to. Only let the rootfs
+    // build push.
+    build
+        .without_cache_to()
+        .build(sh, &name, &dir, target, &args)?;
     Ok(reference)
 }
 
