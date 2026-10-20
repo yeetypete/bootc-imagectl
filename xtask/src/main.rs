@@ -19,15 +19,6 @@ mod vm;
 /// The repository the test images and examples are tagged under.
 const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 
-/// chunkah OCI image.
-const CHUNKAH: &str = "quay.io/coreos/chunkah:v0.7.1@sha256:71e593421c5de7dcc7c8c5c50e98d3bac572055a76f399f61a491d123c20a523";
-
-/// The max layers chunkah splits an image into.
-const CHUNKAH_MAX_LAYERS: u32 = 128;
-
-/// The mtime chunkah clamps every file to.
-const CHUNKAH_SOURCE_DATE_EPOCH: u32 = 0;
-
 /// The environment variable setting `Build`.
 const BUILD_OPTIONS_ENV: &str = "BOOTC_IMAGECTL_BUILD_OPTIONS";
 
@@ -384,33 +375,18 @@ fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) 
     let reference = format!("{REPOSITORY}:{tag}");
     image.render(workspace_dir()?, &dir)?;
     let name = image.build_name();
-    let rootfs = format!("{reference}-rootfs");
-    let rootfs_args = ["--target=rootfs".into(), format!("--tag={rootfs}")];
-    build.build(sh, &name, &dir, target, &rootfs_args)?;
-    let chunked = rechunk(sh, &rootfs, &dir)?;
+    // chunkah writes chunked/ to `dir`, and podman resolves FROM oci:chunked
+    // from its working directory. The volume and label=disable are for
+    // Buildah < 1.44.
+    let _dir = sh.push_dir(&dir);
     let args = [
-        format!("--build-context=chunked=container-image://{chunked}"),
+        "--skip-unused-stages=false".into(),
+        format!("--volume={}:/run/src", dir.display()),
+        "--security-opt=label=disable".into(),
         format!("--tag={reference}"),
     ];
     build.build(sh, &name, &dir, target, &args)?;
     Ok(reference)
-}
-
-/// Rechunk the image `rootfs` with chunkah.
-fn rechunk(sh: &Shell, rootfs: &str, dir: &Path) -> Result<String> {
-    let config = cmd!(sh, "podman image inspect {rootfs}").read()?;
-    let mount = format!("type=image,src={rootfs},dst=/chunkah");
-    let volume = format!("{}:/srv:z", dir.display());
-    let max_layers = CHUNKAH_MAX_LAYERS.to_string();
-    let epoch = CHUNKAH_SOURCE_DATE_EPOCH.to_string();
-    cmd!(
-        sh,
-        "podman run --rm --mount={mount} --volume={volume} --env=CHUNKAH_CONFIG_STR {CHUNKAH} build --max-layers={max_layers} --source-date-epoch={epoch} --output=oci:chunked"
-    )
-    .env("CHUNKAH_CONFIG_STR", config)
-    .run()?;
-    let layout = dir.join("chunked");
-    Ok(cmd!(sh, "podman pull --quiet oci:{layout}").read()?)
 }
 
 /// Build bootc-imagectl and return the target directory holding it.

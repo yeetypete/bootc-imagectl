@@ -1,4 +1,5 @@
 ARG UBUNTU_IMAGE=docker.io/library/ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
+ARG CHUNKAH_IMAGE=quay.io/coreos/chunkah:v0.7.1@sha256:71e593421c5de7dcc7c8c5c50e98d3bac572055a76f399f61a491d123c20a523
 
 
 FROM ${UBUNTU_IMAGE} AS system-files
@@ -112,7 +113,7 @@ CMD ["/sbin/init"]
 FROM image AS finalized
 
 # The directory holding bootc-imagectl is passed as the bootc-imagectl build
-# context, see the build steps above the uki stage.
+# context, see the build command above the chunkah stage.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
 RUN --network=none /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts --chunkah-xattrs
 
@@ -126,18 +127,28 @@ RUN bootc container split-kernel-and-rootfs --output /kernel && \
 RUN bootc container lint --fatal-warnings
 
 
-# The rootfs stage, rechunked by chunkah, is passed as the chunked build
-# context:
+# chunkah splits rootfs into a layer per group of packages. It writes the image
+# to chunked/ in the build context, which the chunked stage starts from:
 #
-#     podman build --build-context bootc-imagectl=target/release \
-#       --target rootfs --tag localhost/rootfs .
-#     podman run --rm --mount type=image,src=localhost/rootfs,dst=/chunkah \
-#       --env CHUNKAH_CONFIG_STR="$(podman image inspect localhost/rootfs)" \
-#       quay.io/coreos/chunkah build --max-layers 128 --source-date-epoch 0 \
-#       --tag localhost/chunked | podman load
-#     podman build --build-context bootc-imagectl=target/release \
-#       --build-context chunked=container-image://localhost/chunked .
+#     podman build --skip-unused-stages=false \
+#       --build-context bootc-imagectl=target/release \
+#       --volume "$PWD:/run/src" --security-opt label=disable .
 #
+# The volume and label=disable let it write chunked/ with Buildah before 1.44.
+FROM ${CHUNKAH_IMAGE} AS chunkah
+
+RUN --mount=type=bind,target=/run/src,rw \
+    --mount=type=bind,from=rootfs,target=/chunkah,ro \
+    rm -rf /run/src/chunked && \
+    chunkah build \
+      --max-layers 128 \
+      --source-date-epoch 0 \
+      --output oci:/run/src/chunked
+
+
+FROM oci:chunked AS chunked
+
+
 # Seal the UKI from chunked so that its composefs digest covers the mtimes
 # chunkah rewrites.
 FROM chunked AS uki
@@ -153,3 +164,7 @@ RUN --mount=type=bind,from=chunked,target=/target \
 FROM chunked
 
 COPY --from=uki /uki/ /boot/EFI/Linux/
+
+# chunked has an empty image config.
+LABEL containers.bootc=1
+CMD ["/sbin/init"]

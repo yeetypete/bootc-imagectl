@@ -1,4 +1,5 @@
 ARG FEDORA_IMAGE=registry.fedoraproject.org/fedora:44@sha256:72de8cab9539c06d525c73867d5b46b4390a7c71e441a7d99506dd47cd4f7b75
+ARG CHUNKAH_IMAGE=quay.io/coreos/chunkah:v0.7.1@sha256:71e593421c5de7dcc7c8c5c50e98d3bac572055a76f399f61a491d123c20a523
 
 
 FROM ${FEDORA_IMAGE} AS system-files
@@ -80,7 +81,22 @@ RUN bootc container split-kernel-and-rootfs --output /kernel && \
 RUN bootc container lint --fatal-warnings
 
 
-# The xtask passes rootfs rechunked by chunkah as the chunked build context.
+# chunkah splits rootfs into a layer per group of packages. It writes the image
+# to chunked/ in the build context, which the chunked stage starts from.
+FROM ${CHUNKAH_IMAGE} AS chunkah
+
+RUN --mount=type=bind,target=/run/src,rw \
+    --mount=type=bind,from=rootfs,target=/chunkah,ro \
+    rm -rf /run/src/chunked && \
+    chunkah build \
+      --max-layers 128 \
+      --source-date-epoch 0 \
+      --output oci:/run/src/chunked
+
+
+FROM oci:chunked AS chunked
+
+
 # Seal the UKI from chunked so that its composefs digest covers the mtimes
 # chunkah rewrites.
 FROM chunked AS uki
@@ -96,3 +112,7 @@ RUN --mount=type=bind,from=chunked,target=/target \
 FROM chunked
 
 COPY --from=uki /uki/ /boot/EFI/Linux/
+
+# chunked has an empty image config.
+LABEL containers.bootc=1
+CMD ["/sbin/init"]
