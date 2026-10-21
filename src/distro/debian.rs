@@ -1,6 +1,7 @@
 //! Debian and derivatives.
 
 use std::collections::BTreeSet;
+use std::fmt::{self, Write as _};
 use std::io::Read;
 use std::process::Command;
 use std::str::FromStr;
@@ -8,14 +9,22 @@ use std::str::FromStr;
 use anyhow::{Context, Result, bail, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cap_std::fs_utf8::Dir;
-use cap_std_ext::dirext::CapStdExtDirExtUtf8;
+use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 use flate2::bufread::GzDecoder;
 use tracing::debug;
 
+use uzers::{Groups, Users, UsersCache};
+
 use super::{Components, Distro, PackageName, SYSIMAGE};
 use crate::fs::move_dir;
+use crate::id::{Gid, Uid};
+use crate::passwd::{Entry as _, Group, Passwd};
 
 const DATABASE: &str = "var/lib/dpkg";
+
+/// dpkg's statoverride file, which overrides the ownership and mode of paths,
+/// once [`Debian::relocate_package_state`] moved the database under /usr.
+const STATOVERRIDE: &str = "usr/lib/sysimage/dpkg/statoverride";
 
 /// The package state under /var and where it moves under [`SYSIMAGE`].
 const STATE: [(&str, &str); 6] = [
@@ -79,6 +88,133 @@ impl FromStr for PackageState {
             _ => bail!("{state:?} is not a dpkg package state"),
         })
     }
+}
+
+/// The user or group of a stat override, by name or by number with a leading
+/// `#`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StatOwner<T> {
+    Name(String),
+    Id(T),
+}
+
+impl<T> StatOwner<T> {
+    /// Refer to the owner by the ID `id_of` returns for its name, if any.
+    fn refer_by_id(&mut self, id_of: impl FnOnce(&str) -> Result<Option<T>>) -> Result<()> {
+        if let Self::Name(name) = self
+            && let Some(id) = id_of(name)?
+        {
+            *self = Self::Id(id);
+        }
+        Ok(())
+    }
+}
+
+impl<T: FromStr<Err = anyhow::Error>> FromStr for StatOwner<T> {
+    type Err = anyhow::Error;
+
+    fn from_str(field: &str) -> Result<Self> {
+        match field.strip_prefix('#') {
+            Some(id) => id.parse().map(Self::Id),
+            None => Ok(Self::Name(field.to_owned())),
+        }
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for StatOwner<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Name(name) => f.write_str(name),
+            Self::Id(id) => write!(f, "#{id}"),
+        }
+    }
+}
+
+/// A stat override, one line of [`STATOVERRIDE`] in the form:
+/// user, group, mode and path, e.g. `root ssl-cert 710 /etc/ssl/private`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StatOverride {
+    user: StatOwner<Uid>,
+    group: StatOwner<Gid>,
+    mode: String,
+    /// The rest of the line, as paths may contain spaces.
+    path: Utf8PathBuf,
+}
+
+impl FromStr for StatOverride {
+    type Err = anyhow::Error;
+
+    fn from_str(line: &str) -> Result<Self> {
+        let [user, group, mode, path] = line.splitn(4, ' ').collect::<Vec<_>>()[..] else {
+            bail!("malformed stat override {line:?}");
+        };
+        Ok(Self {
+            user: user.parse()?,
+            group: group.parse()?,
+            mode: mode.to_owned(),
+            path: path.into(),
+        })
+    }
+}
+
+impl fmt::Display for StatOverride {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            user,
+            group,
+            mode,
+            path,
+        } = self;
+        write!(f, "{user} {group} {mode} {path}")
+    }
+}
+
+/// Write the stat override owners missing from /etc/passwd and /etc/group,
+/// which finalize moved to userdb, as `#ID`. dpkg 1.22.16 and later look the
+/// owners up in those files instead of through NSS, and abort on any they
+/// don't find. They accept and keep `#ID`.
+fn refer_to_moved_owners_by_id(root: &Dir, nss: &(impl Users + Groups)) -> Result<()> {
+    let Some(content) = root
+        .as_cap_std()
+        .read_to_string_optional(STATOVERRIDE)
+        .with_context(|| format!("reading /{STATOVERRIDE}"))?
+    else {
+        return Ok(());
+    };
+    let users = Passwd::read_all(root)?;
+    let groups = Group::read_all(root)?;
+    let mut numbered = String::new();
+    for line in content.lines() {
+        let mut entry: StatOverride = line
+            .parse()
+            .with_context(|| format!("parsing /{STATOVERRIDE}"))?;
+        entry.user.refer_by_id(|name| {
+            if users.iter().any(|user| user.name.as_str() == name) {
+                return Ok(None);
+            }
+            nss.get_user_by_name(name)
+                .and_then(|user| Uid::new(user.uid()))
+                .map(Some)
+                .with_context(|| format!("the stat override user {name} does not resolve"))
+        })?;
+        entry.group.refer_by_id(|name| {
+            if groups.iter().any(|group| group.name.as_str() == name) {
+                return Ok(None);
+            }
+            nss.get_group_by_name(name)
+                .and_then(|group| Gid::new(group.gid()))
+                .map(Some)
+                .with_context(|| format!("the stat override group {name} does not resolve"))
+        })?;
+        writeln!(numbered, "{entry}")?;
+    }
+    if numbered != content {
+        debug!("referring to the owners in /{STATOVERRIDE} by ID");
+        let perms = root.metadata(STATOVERRIDE)?.permissions();
+        root.atomic_write_with_perms(STATOVERRIDE, numbered, perms)
+            .with_context(|| format!("writing /{STATOVERRIDE}"))?;
+    }
+    Ok(())
 }
 
 /// The symlink target from `path` to `target`, as a relative path.
@@ -230,12 +366,13 @@ impl Distro for Debian {
         link_state(root)
     }
 
-    /// Recreate the directories required by apt to exist.
+    /// Recreate the directories required by apt to exist, and refer to the
+    /// stat override owners finalize moved to userdb by ID.
     fn restore_package_state(&self, root: &Dir) -> Result<()> {
         for dir in APT_DIRS {
             root.create_dir_all(dir)?;
         }
-        Ok(())
+        refer_to_moved_owners_by_id(root, &UsersCache::new())
     }
 
     fn package_owning(&self, path: &Utf8Path) -> Result<Option<PackageName>> {
@@ -341,6 +478,10 @@ mod tests {
     use flate2::write::GzEncoder;
 
     use super::*;
+    use cap_std_ext::cap_tempfile::utf8::TempDir;
+    use uzers::mock::MockUsers;
+    use uzers::{Group as MockGroup, User};
+
     use crate::testutil::rootfs;
 
     #[test]
@@ -367,6 +508,54 @@ mod tests {
         assert!(err.to_string().contains("multiple packages own"), "{err}");
         assert!(owner("something else\n").is_err());
         Ok(())
+    }
+
+    /// A rootfs whose /etc has root, and whose stat overrides name root, the
+    /// moved messagebus and ssl-cert, and an ID.
+    fn stat_override_rootfs() -> Result<TempDir> {
+        let root = rootfs()?;
+        root.create_dir_all("etc")?;
+        root.write("etc/passwd", "root:x:0:0:root:/root:/bin/bash\n")?;
+        root.write("etc/group", "root:x:0:\n")?;
+        root.create_dir_all("usr/lib/sysimage/dpkg")?;
+        root.write(
+            STATOVERRIDE,
+            "root ssl-cert 710 /etc/ssl/private\n\
+             messagebus #5 4754 /usr/lib/dbus helper\n",
+        )?;
+        Ok(root)
+    }
+
+    #[test]
+    fn refers_to_moved_stat_override_owners_by_id() -> Result<()> {
+        let root = stat_override_rootfs()?;
+        let mut nss = MockUsers::with_current_uid(0);
+        nss.add_user(User::new(991, "messagebus", 991));
+        nss.add_group(MockGroup::new(102, "ssl-cert"));
+        refer_to_moved_owners_by_id(&root, &nss)?;
+        assert_eq!(
+            root.read_to_string(STATOVERRIDE)?,
+            "root #102 710 /etc/ssl/private\n#991 #5 4754 /usr/lib/dbus helper\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_unresolved_stat_override_owners() -> Result<()> {
+        let root = stat_override_rootfs()?;
+        let nss = MockUsers::with_current_uid(0);
+        assert!(refer_to_moved_owners_by_id(&root, &nss).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_malformed_stat_overrides() {
+        assert!("root ssl-cert 710".parse::<StatOverride>().is_err());
+        assert!(
+            "root #x 710 /etc/ssl/private"
+                .parse::<StatOverride>()
+                .is_err()
+        );
     }
 
     #[test]
