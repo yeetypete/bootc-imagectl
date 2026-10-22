@@ -133,11 +133,11 @@ jobs:
           sudo udevadm trigger --name-match=kvm --name-match=vhost-vsock
 
       - name: Log in to GitHub Container Registry
-        uses: redhat-actions/podman-login@50c2d9a331bb67c8fdab99b86455fad05e2e3252 # v2.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          podman login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin <<< "$GITHUB_TOKEN"
 
       - name: Run the tests on ${{ matrix.image }}
         run: just test-image ${{ matrix.image }}
