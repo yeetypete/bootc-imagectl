@@ -13,17 +13,16 @@ use crate::command::CommandRunExt;
 /// The file name of the ESP's definition.
 const ESP_FILE: &str = "10-esp.conf";
 
-/// The ESP's repart.d(5) definition.
-///
-/// systemd-boot keeps every kernel and initramfs on the ESP, and bootc keeps
-/// several deployments, so the usual 512M is too small.
+/// The ESP's repart.d(5) definition, sized like the ESP bootc install to-disk
+/// creates for the composefs backend, see
+/// <https://github.com/bootc-dev/bootc/blob/main/crates/lib/src/install/baseline.rs>.
 const ESP_DEFINITION: &str = "\
 [Partition]
 Type=esp
 Format=vfat
 Label=esp
-SizeMinBytes=1G
-SizeMaxBytes=1G
+SizeMinBytes=2G
+SizeMaxBytes=2G
 ";
 
 /// The file name of the root partition's definition.
