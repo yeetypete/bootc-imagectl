@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::accounts::{self, MovedAccounts};
+use crate::dpkg;
 use crate::finalize::{ROOT, names, var_tmpfiles};
 
 #[test]
@@ -19,6 +20,11 @@ fn moves_dpkg_database_and_links_it_back() -> Result<()> {
         Path::new("../../usr/lib/sysimage/debconf")
     );
     Ok(())
+}
+
+#[test]
+fn installs_packages_with_dpkg() -> Result<()> {
+    dpkg::installs_and_removes_package()
 }
 
 #[test]
