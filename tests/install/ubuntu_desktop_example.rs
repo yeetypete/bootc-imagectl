@@ -4,8 +4,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::testing::{Requirement, Test};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{IntegrationTest, Requirement, integration_test};
 
 fn starts_display_manager() -> Result<()> {
     Command::new("systemctl")
@@ -16,4 +15,4 @@ fn starts_display_manager() -> Result<()> {
 
 const REQUIRES: &[Requirement] = &[Requirement::Image("ubuntu-desktop-example")];
 
-pub(crate) const TESTS: &[Test] = &[trial!(starts_display_manager, REQUIRES)];
+pub(crate) const TESTS: &[IntegrationTest] = &[integration_test!(starts_display_manager, REQUIRES)];

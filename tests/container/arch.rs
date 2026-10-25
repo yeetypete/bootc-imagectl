@@ -3,8 +3,7 @@
 use anyhow::Result;
 
 use crate::finalize::{ROOT, names, var_tmpfiles};
-use bootc_imagectl::testing::{Requirement, Test};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{IntegrationTest, Requirement, integration_test};
 
 fn moves_pacman_database_and_removes_its_indexes() -> Result<()> {
     let pacman_conf = ROOT.read_to_string("etc/pacman.conf")?;
@@ -36,8 +35,8 @@ fn records_var_entries_in_tmpfiles() -> Result<()> {
 
 const REQUIRES: &[Requirement] = &[Requirement::Distro(&["arch"])];
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(moves_pacman_database_and_removes_its_indexes, REQUIRES),
-    trial!(keeps_only_expected_entries_in_var, REQUIRES),
-    trial!(records_var_entries_in_tmpfiles, REQUIRES),
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(moves_pacman_database_and_removes_its_indexes, REQUIRES),
+    integration_test!(keeps_only_expected_entries_in_var, REQUIRES),
+    integration_test!(records_var_entries_in_tmpfiles, REQUIRES),
 ];

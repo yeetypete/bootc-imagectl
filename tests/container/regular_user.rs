@@ -1,8 +1,7 @@
 //! Check the accounts of the images with a regular user built in.
 
 use anyhow::Result;
-use bootc_imagectl::testing::{self, Feature, Requirement, Test};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{self, Feature, IntegrationTest, Requirement, integration_test};
 use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 
@@ -127,18 +126,18 @@ fn initramfs_contains_user_records() -> Result<()> {
 
 const REQUIRES: &[Requirement] = &[Requirement::Without(Feature::Homed)];
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(locks_uids_of_package_users, REQUIRES),
-    trial!(
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(locks_uids_of_package_users, REQUIRES),
+    integration_test!(
         moves_accounts_out_of_etc_and_resolves_them_through_nss,
         REQUIRES
     ),
-    trial!(writes_user_records_to_userdb, REQUIRES),
-    trial!(writes_group_records_to_userdb, REQUIRES),
-    trial!(writes_privileged_records_for_users_with_passwords, REQUIRES),
-    trial!(
+    integration_test!(writes_user_records_to_userdb, REQUIRES),
+    integration_test!(writes_group_records_to_userdb, REQUIRES),
+    integration_test!(writes_privileged_records_for_users_with_passwords, REQUIRES),
+    integration_test!(
         writes_membership_files_for_primary_and_auxiliary_groups,
         REQUIRES
     ),
-    trial!(initramfs_contains_user_records, REQUIRES),
+    integration_test!(initramfs_contains_user_records, REQUIRES),
 ];

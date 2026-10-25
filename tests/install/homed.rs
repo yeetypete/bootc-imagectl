@@ -6,8 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::testing::{self, Feature, Requirement, Test};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{self, Feature, IntegrationTest, Requirement, integration_test};
 use serde::{Deserialize, Deserializer};
 
 /// The user the xtask passes a credential for.
@@ -91,7 +90,7 @@ fn stores_wizard_user_unencrypted() -> Result<()> {
 
 const REQUIRES: &[Requirement] = &[Requirement::Feature(Feature::Homed)];
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(adds_wizard_user_to_groups, REQUIRES),
-    trial!(stores_wizard_user_unencrypted, REQUIRES),
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(adds_wizard_user_to_groups, REQUIRES),
+    integration_test!(stores_wizard_user_unencrypted, REQUIRES),
 ];

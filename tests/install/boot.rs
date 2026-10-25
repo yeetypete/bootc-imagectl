@@ -5,8 +5,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::testing::Test;
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{IntegrationTest, integration_test};
 use rustix::fs::{StatVfsMountFlags, statvfs};
 use serde::Deserialize;
 
@@ -118,11 +117,11 @@ fn mounts_etc_and_var_writable() -> Result<()> {
     Ok(())
 }
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(boots_to_running),
-    trial!(finds_root_by_partition_type),
-    trial!(unlocks_encrypted_root),
-    trial!(allows_discards_on_encrypted_root),
-    trial!(formats_root_with_requested_filesystem),
-    trial!(mounts_etc_and_var_writable),
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(boots_to_running),
+    integration_test!(finds_root_by_partition_type),
+    integration_test!(unlocks_encrypted_root),
+    integration_test!(allows_discards_on_encrypted_root),
+    integration_test!(formats_root_with_requested_filesystem),
+    integration_test!(mounts_etc_and_var_writable),
 ];

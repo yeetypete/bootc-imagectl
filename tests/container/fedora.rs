@@ -5,8 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::finalize::{ROOT, names, preset_changes, var_tmpfiles};
-use bootc_imagectl::testing::{Requirement, Test};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{IntegrationTest, Requirement, integration_test};
 
 fn applies_full_preset_policy() -> Result<()> {
     // finalize runs `systemctl preset-all --preset-mode=enable-only`, which
@@ -47,9 +46,9 @@ fn records_var_entries_in_tmpfiles() -> Result<()> {
 
 const REQUIRES: &[Requirement] = &[Requirement::Distro(&["fedora"])];
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(applies_full_preset_policy, REQUIRES),
-    trial!(keeps_rpm_database_under_usr, REQUIRES),
-    trial!(keeps_only_expected_entries_in_var, REQUIRES),
-    trial!(records_var_entries_in_tmpfiles, REQUIRES),
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(applies_full_preset_policy, REQUIRES),
+    integration_test!(keeps_rpm_database_under_usr, REQUIRES),
+    integration_test!(keeps_only_expected_entries_in_var, REQUIRES),
+    integration_test!(records_var_entries_in_tmpfiles, REQUIRES),
 ];

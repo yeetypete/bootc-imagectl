@@ -8,8 +8,7 @@ use std::sync::LazyLock;
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
 use bootc_imagectl::distro::{self, PackageName};
-use bootc_imagectl::testing::Test;
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{IntegrationTest, integration_test};
 use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs::{Dir, MetadataExt};
 use cap_std_ext::cap_std::{ambient_authority, fs_utf8};
@@ -204,16 +203,16 @@ fn queries_packages_from_moved_database() -> Result<()> {
     Ok(())
 }
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(lays_out_toplevel),
-    trial!(patches_systemd_tmpfiles),
-    trial!(skips_declared_paths_in_var_tmpfiles),
-    trial!(sets_up_tmp_run_and_lock_in_var),
-    trial!(records_enabled_units_in_presets),
-    trial!(ends_presets_with_catchall),
-    trial!(applies_preset_policy),
-    trial!(removes_machine_identity),
-    trial!(boots_from_uki),
-    trial!(initramfs_resolves_users_through_nss_systemd),
-    trial!(queries_packages_from_moved_database),
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(lays_out_toplevel),
+    integration_test!(patches_systemd_tmpfiles),
+    integration_test!(skips_declared_paths_in_var_tmpfiles),
+    integration_test!(sets_up_tmp_run_and_lock_in_var),
+    integration_test!(records_enabled_units_in_presets),
+    integration_test!(ends_presets_with_catchall),
+    integration_test!(applies_preset_policy),
+    integration_test!(removes_machine_identity),
+    integration_test!(boots_from_uki),
+    integration_test!(initramfs_resolves_users_through_nss_systemd),
+    integration_test!(queries_packages_from_moved_database),
 ];

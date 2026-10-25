@@ -1,8 +1,7 @@
 //! Check how finalize configured systemd-homed's first boot wizard.
 
 use anyhow::Result;
-use bootc_imagectl::testing::{self, Feature, Requirement, Test};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{self, Feature, IntegrationTest, Requirement, integration_test};
 
 use crate::finalize::ROOT;
 
@@ -25,4 +24,5 @@ fn adds_wizard_user_to_groups() -> Result<()> {
 
 const REQUIRES: &[Requirement] = &[Requirement::Feature(Feature::Homed)];
 
-pub(crate) const TESTS: &[Test] = &[trial!(adds_wizard_user_to_groups, REQUIRES)];
+pub(crate) const TESTS: &[IntegrationTest] =
+    &[integration_test!(adds_wizard_user_to_groups, REQUIRES)];

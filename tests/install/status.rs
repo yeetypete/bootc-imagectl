@@ -4,8 +4,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::testing::{self, Test};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{self, IntegrationTest, integration_test};
 use serde::Deserialize;
 
 /// The host status, as reported by `bootc status --json`.
@@ -46,4 +45,4 @@ fn updates_from_target_imgref() -> Result<()> {
     Ok(())
 }
 
-pub(crate) const TESTS: &[Test] = &[trial!(updates_from_target_imgref)];
+pub(crate) const TESTS: &[IntegrationTest] = &[integration_test!(updates_from_target_imgref)];

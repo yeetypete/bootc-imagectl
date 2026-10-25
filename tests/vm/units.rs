@@ -3,8 +3,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use bootc_imagectl::testing::{Test, written_before_boot};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{IntegrationTest, integration_test, written_before_boot};
 
 /// The first boot, which applied the systemd presets, changed no symlink in
 /// /etc/systemd/system.
@@ -29,4 +28,5 @@ fn assert_written_before_boot(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) const TESTS: &[Test] = &[trial!(keeps_units_unchanged_after_first_boot)];
+pub(crate) const TESTS: &[IntegrationTest] =
+    &[integration_test!(keeps_units_unchanged_after_first_boot)];

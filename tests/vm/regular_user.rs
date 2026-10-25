@@ -6,8 +6,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::testing::{self, Feature, Requirement, Test};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{self, Feature, IntegrationTest, Requirement, integration_test};
 
 /// The user and the system users resolve through NSS, with the user's
 /// groups and its password hash from the privileged record.
@@ -65,7 +64,7 @@ fn accepts_password_of_moved_user() -> Result<()> {
 
 const REQUIRES: &[Requirement] = &[Requirement::Without(Feature::Homed)];
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(resolves_moved_users_through_nss, REQUIRES),
-    trial!(accepts_password_of_moved_user, REQUIRES),
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(resolves_moved_users_through_nss, REQUIRES),
+    integration_test!(accepts_password_of_moved_user, REQUIRES),
 ];

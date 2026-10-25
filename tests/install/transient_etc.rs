@@ -7,8 +7,9 @@ use std::process::Command;
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
 use bootc_imagectl::finalize::{DBUS_MACHINE_ID, PULL_SECRET, PULL_SECRET_LINK, SSH_HOST_KEY_DIR};
-use bootc_imagectl::testing::{Feature, Requirement, Test, boot_time, written_before_boot};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{
+    Feature, IntegrationTest, Requirement, boot_time, integration_test, written_before_boot,
+};
 use camino::Utf8Path;
 
 use crate::homed::user_record;
@@ -80,11 +81,11 @@ fn links_pull_secret() -> Result<()> {
 
 const REQUIRES: &[Requirement] = &[Requirement::Feature(Feature::TransientEtc)];
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(mounts_etc_transient, REQUIRES),
-    trial!(keeps_wizard_user, REQUIRES),
-    trial!(keeps_machine_id, REQUIRES),
-    trial!(persists_machine_id_in_var, REQUIRES),
-    trial!(keeps_ssh_host_keys, REQUIRES),
-    trial!(links_pull_secret, REQUIRES),
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(mounts_etc_transient, REQUIRES),
+    integration_test!(keeps_wizard_user, REQUIRES),
+    integration_test!(keeps_machine_id, REQUIRES),
+    integration_test!(persists_machine_id_in_var, REQUIRES),
+    integration_test!(keeps_ssh_host_keys, REQUIRES),
+    integration_test!(links_pull_secret, REQUIRES),
 ];

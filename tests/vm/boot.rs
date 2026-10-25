@@ -5,8 +5,7 @@ use std::process::Command;
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
 use bootc_imagectl::distro::{self, PackageName};
-use bootc_imagectl::testing::Test;
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{IntegrationTest, integration_test};
 use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::{ambient_authority, fs_utf8};
 
@@ -30,7 +29,7 @@ fn queries_packages_from_moved_database() -> Result<()> {
     Ok(())
 }
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(boots_to_running),
-    trial!(queries_packages_from_moved_database),
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(boots_to_running),
+    integration_test!(queries_packages_from_moved_database),
 ];

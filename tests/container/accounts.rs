@@ -3,8 +3,7 @@
 use anyhow::Result;
 
 use crate::finalize::ROOT;
-use bootc_imagectl::testing::Test;
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{IntegrationTest, integration_test};
 
 /// The user of a removed package keeps its UID and the GID of its group,
 /// locked.
@@ -18,4 +17,4 @@ fn keeps_removed_accounts_locked() -> Result<()> {
     Ok(())
 }
 
-pub(crate) const TESTS: &[Test] = &[trial!(keeps_removed_accounts_locked)];
+pub(crate) const TESTS: &[IntegrationTest] = &[integration_test!(keeps_removed_accounts_locked)];

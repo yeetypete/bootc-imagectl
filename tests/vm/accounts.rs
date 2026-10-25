@@ -5,8 +5,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::testing::{self, Test, written_before_boot};
-use bootc_imagectl::trial;
+use bootc_imagectl::testing::{self, IntegrationTest, integration_test, written_before_boot};
 use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use rustix::fs::{StatVfsMountFlags, statvfs};
@@ -47,7 +46,7 @@ fn mounts_account_files_read_only() -> Result<()> {
     Ok(())
 }
 
-pub(crate) const TESTS: &[Test] = &[
-    trial!(keeps_account_files_unchanged_after_first_boot),
-    trial!(mounts_account_files_read_only),
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(keeps_account_files_unchanged_after_first_boot),
+    integration_test!(mounts_account_files_read_only),
 ];
