@@ -1,0 +1,9 @@
+# WORKAROUND: systemd-vmspawn connects over AF_VSOCK, where systemd 256's
+# systemd-ssh-generator binds sshd. systemd 255 has no such generator.
+[Unit]
+Description=OpenSSH Server Socket (AF_VSOCK)
+ConditionVirtualization=vm
+
+[Socket]
+ListenStream=vsock::22
+Accept=yes

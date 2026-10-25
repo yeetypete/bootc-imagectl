@@ -1,0 +1,10 @@
+# WORKAROUND: the per-connection sshd for sshd-vsock.socket. systemd-vmspawn
+# passes a drop-in for it that loads its ephemeral key.
+[Unit]
+Description=OpenSSH Per-Connection Server Daemon (AF_VSOCK)
+
+[Service]
+ExecStart=-/usr/sbin/sshd -i
+StandardInput=socket
+RuntimeDirectory=sshd
+RuntimeDirectoryPreserve=yes

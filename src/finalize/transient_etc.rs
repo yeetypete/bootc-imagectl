@@ -24,6 +24,7 @@ use cap_std_ext::dirext::{CapStdExtDirExt, CapStdExtDirExtUtf8};
 use tracing::debug;
 
 use super::GENERATED_HEADER;
+use super::identity::{SSHD_HOST_KEY_DIR, SSHD_KEYGEN_UNIT};
 use super::kargs::{self, KARGS_DIR};
 use super::layout::SETUP_ROOT_CONF;
 use super::setup_root;
@@ -54,12 +55,9 @@ const MACHINE_ID_UNIT: &str = "bootc-imagectl-machine-id-persist.service";
 /// The directory the host keys are kept in.
 pub const SSH_HOST_KEY_DIR: &str = "/var/lib/ssh";
 
-/// The directory sshd and `ssh-keygen -A` keep the host keys in by default,
-/// which links to [`SSH_HOST_KEY_DIR`].
-const SSHD_HOST_KEY_DIR: &str = "/etc/ssh";
-
-/// The unit generating the missing host keys.
-const SSHD_KEYGEN_UNIT: &str = "bootc-imagectl-sshd-keygen.service";
+/// The drop-in keeping the host keys [`SSHD_KEYGEN_UNIT`] generates in
+/// [`SSH_HOST_KEY_DIR`].
+const SSHD_KEYGEN_DROPIN: &str = "50-transient-etc.conf";
 
 /// The tmpfiles.d file linking the pull secret into /run.
 const PULL_SECRET_TMPFILES: &str = "bootc-imagectl-pull-secret.conf";
@@ -119,7 +117,7 @@ pub(super) fn finalize(root: &Dir) -> Result<()> {
     if root.exists("etc/ssh/sshd_config") {
         let config = Command::new("sshd").arg("-G").run_get_string()?;
         let keys = generated_host_keys(&config)?;
-        write_sshd_keygen_unit(root)?;
+        write_sshd_keygen_dropin(root)?;
         write_ssh_host_key_links(root, &keys)?;
     }
     write_pull_secret_link(root)
@@ -250,27 +248,24 @@ fn generated_host_keys(config: &str) -> Result<Vec<Utf8PathBuf>> {
     Ok(keys)
 }
 
-/// Generate the missing host keys in /var before sshd starts.
-fn write_sshd_keygen_unit(root: &Dir) -> Result<()> {
-    let unit = format!(
+/// Generate the missing host keys in /var instead of /etc.
+fn write_sshd_keygen_dropin(root: &Dir) -> Result<()> {
+    let dir = format!("{VENDOR_UNIT_DIR}/{SSHD_KEYGEN_UNIT}.d");
+    root.create_dir_all(&dir)
+        .with_context(|| format!("creating /{dir}"))?;
+    let path = format!("{dir}/{SSHD_KEYGEN_DROPIN}");
+    let dropin = format!(
         "{GENERATED_HEADER}
 [Unit]
-Description=OpenSSH Server Key Generation
-DefaultDependencies=no
 RequiresMountsFor={SSH_HOST_KEY_DIR}
-After=local-fs.target
-Before=sysinit.target shutdown.target
-Conflicts=shutdown.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
 StateDirectory=ssh
 BindPaths={SSH_HOST_KEY_DIR}:{SSHD_HOST_KEY_DIR}
-ExecStart=ssh-keygen -A
 "
     );
-    units::write_enabled_unit(root, SSHD_KEYGEN_UNIT, &unit, "sysinit.target")
+    root.write(&path, dropin)
+        .with_context(|| format!("writing /{path}"))
 }
 
 /// The links in /etc/ssh to `keys` and their public keys in /var.
@@ -403,14 +398,15 @@ mod tests {
     }
 
     #[test]
-    fn enables_sshd_keygen_unit() -> Result<()> {
+    fn keeps_generated_host_keys_in_var() -> Result<()> {
         let root = rootfs()?;
-        write_sshd_keygen_unit(&root)?;
-        assert_eq!(
-            root.read_link_contents(format!(
-                "{VENDOR_UNIT_DIR}/sysinit.target.wants/{SSHD_KEYGEN_UNIT}"
-            ))?,
-            format!("../{SSHD_KEYGEN_UNIT}")
+        write_sshd_keygen_dropin(&root)?;
+        let dropin = root.read_to_string(format!(
+            "{VENDOR_UNIT_DIR}/{SSHD_KEYGEN_UNIT}.d/{SSHD_KEYGEN_DROPIN}"
+        ))?;
+        assert!(
+            dropin.contains("BindPaths=/var/lib/ssh:/etc/ssh\n"),
+            "{dropin}"
         );
         Ok(())
     }

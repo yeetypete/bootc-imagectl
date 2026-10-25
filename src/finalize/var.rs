@@ -32,6 +32,10 @@ const VAR_SYMLINKS: &[(&str, &str)] = &[("var/run", "../run"), ("var/lock", "../
 
 /// Leaves unmounting /var to systemd-shutdown. journald keeps /var busy until
 /// systemd-shutdown kills it, so an earlier unmount fails.
+///
+/// TODO: upstream a generated var.mount for composefs boots to bootc, like
+/// ostree-system-generator's, and drop this. systemd before 258 ignores this
+/// drop-in.
 const VAR_MOUNT_DROPIN: &str = "usr/lib/systemd/system/var.mount.d/10-bootc-imagectl.conf";
 const VAR_MOUNT_DROPIN_CONTENT: &str = "\
 [Unit]
