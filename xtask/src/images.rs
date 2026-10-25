@@ -26,7 +26,7 @@ const TRANSIENT_ETC_EXAMPLES: &[&str] = &["ubuntu-transient-etc"];
 /// A variant of every test image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Variant {
-    /// A regular user is baked into the image.
+    /// A regular user is built into the image.
     Default,
     /// The image has no regular user. systemd-homed's first boot wizard
     /// creates it.

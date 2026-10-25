@@ -151,6 +151,7 @@ const FEATURES_ENV: &str = "BOOTC_IMAGECTL_TEST_FEATURES";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Feature {
     /// systemd-homed's first boot wizard creates the regular user.
+    /// Without it, the user is built into the image.
     Homed,
     /// The image has a transient /etc.
     TransientEtc,
@@ -186,8 +187,8 @@ pub enum Requirement {
     Image(&'static str),
     /// The image has this feature.
     Feature(Feature),
-    /// A regular user is baked into the image, so it lacks [`Feature::Homed`].
-    RegularUser,
+    /// The image lacks this feature.
+    Without(Feature),
 }
 
 impl fmt::Display for Requirement {
@@ -196,7 +197,7 @@ impl fmt::Display for Requirement {
             Self::Distro(distros) => write!(f, "{}", distros.join(" or ")),
             Self::Image(tag) => write!(f, "the {tag} image"),
             Self::Feature(feature) => feature.fmt(f),
-            Self::RegularUser => f.write_str("a regular user"),
+            Self::Without(feature) => write!(f, "no {feature}"),
         }
     }
 }
@@ -282,7 +283,7 @@ impl TestImage {
             Requirement::Distro(distros) => distros.contains(&self.distro),
             Requirement::Image(tag) => self.tag() == *tag,
             Requirement::Feature(feature) => self.features.contains(feature),
-            Requirement::RegularUser => !self.features.contains(&Feature::Homed),
+            Requirement::Without(feature) => !self.features.contains(feature),
         }
     }
 }

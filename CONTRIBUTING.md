@@ -58,7 +58,7 @@ When an install test fails, the logs of the booted system are in
 Each suite has its own test harness, built on
 [libtest-mimic](https://docs.rs/libtest-mimic). Each module lists its tests
 in `TESTS`. A test that only applies to some images declares a
-`Requirement`, such as a distribution or `Homed`, and is ignored for the
+`Requirement`, such as a distribution or a `Feature`, and is ignored for the
 others. See [`src/testing.rs`](src/testing.rs).
 
 ## Adding a distribution

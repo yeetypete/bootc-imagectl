@@ -1,7 +1,7 @@
-//! Check the accounts of the images with a regular user baked in.
+//! Check the accounts of the images with a regular user built in.
 
 use anyhow::Result;
-use bootc_imagectl::testing::{self, Requirement, Test};
+use bootc_imagectl::testing::{self, Feature, Requirement, Test};
 use bootc_imagectl::trial;
 use cap_std_ext::cap_std::fs::MetadataExt;
 use cap_std_ext::cap_std::fs_utf8::Dir;
@@ -125,7 +125,7 @@ fn initramfs_contains_user_records() -> Result<()> {
     Ok(())
 }
 
-const REQUIRES: &[Requirement] = &[Requirement::RegularUser];
+const REQUIRES: &[Requirement] = &[Requirement::Without(Feature::Homed)];
 
 pub(crate) const TESTS: &[Test] = &[
     trial!(locks_uids_of_package_users, REQUIRES),

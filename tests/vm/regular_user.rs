@@ -1,4 +1,4 @@
-//! Check the regular user baked into the booted image.
+//! Check the regular user built into the booted image.
 
 use std::io::Write as _;
 use std::path::Path;
@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::testing::{self, Requirement, Test};
+use bootc_imagectl::testing::{self, Feature, Requirement, Test};
 use bootc_imagectl::trial;
 
 /// The user and the system users resolve through NSS, with the user's
@@ -63,7 +63,7 @@ fn accepts_password_of_moved_user() -> Result<()> {
     Ok(())
 }
 
-const REQUIRES: &[Requirement] = &[Requirement::RegularUser];
+const REQUIRES: &[Requirement] = &[Requirement::Without(Feature::Homed)];
 
 pub(crate) const TESTS: &[Test] = &[
     trial!(resolves_moved_users_through_nss, REQUIRES),
