@@ -41,7 +41,7 @@ fn boots_to_running() -> Result<()> {
     // sshd accepts root before the boot finishes.
     let state = Command::new("systemctl")
         .args(["is-system-running", "--wait"])
-        .output_string()?;
+        .run_get_string()?;
     assert_eq!(state.trim(), "running");
     Ok(())
 }
@@ -60,10 +60,9 @@ fn finds_root_by_partition_type() -> Result<()> {
 
 #[test]
 fn unlocks_encrypted_root() -> Result<()> {
-    let output = Command::new("lsblk")
+    let devices: Devices = Command::new("lsblk")
         .args(["--json", "--list", "--output", "TYPE,MOUNTPOINTS"])
-        .output_string()?;
-    let devices: Devices = serde_json::from_str(&output)?;
+        .run_and_parse_json()?;
     let crypt = devices
         .blockdevices
         .iter()
@@ -78,21 +77,19 @@ fn unlocks_encrypted_root() -> Result<()> {
 
 #[test]
 fn allows_discards_on_encrypted_root() -> Result<()> {
-    let output = Command::new("lsblk")
+    let devices: Devices = Command::new("lsblk")
         .args(["--json", "--list", "--output", "TYPE,PKNAME,MOUNTPOINTS"])
-        .output_string()?;
-    let devices: Devices = serde_json::from_str(&output)?;
+        .run_and_parse_json()?;
     let partition = devices
         .blockdevices
         .iter()
         .find(|device| device.kind == "crypt")
         .and_then(|crypt| crypt.pkname.as_deref())
         .expect("the partition of an unlocked LUKS device");
-    let output = Command::new("cryptsetup")
+    let metadata: LuksMetadata = Command::new("cryptsetup")
         .args(["luksDump", "--dump-json-metadata"])
         .arg(format!("/dev/{partition}"))
-        .output_string()?;
-    let metadata: LuksMetadata = serde_json::from_str(&output)?;
+        .run_and_parse_json()?;
     assert!(
         metadata
             .config
@@ -111,7 +108,7 @@ fn formats_root_with_requested_filesystem() -> Result<()> {
         std::env::var("BOOTC_IMAGECTL_TEST_FILESYSTEM").unwrap_or_else(|_| "ext4".into());
     let fstype = Command::new("findmnt")
         .args(["--noheadings", "--output", "FSTYPE", "/sysroot"])
-        .output_string()?;
+        .run_get_string()?;
     assert_eq!(fstype.trim(), expected);
     Ok(())
 }

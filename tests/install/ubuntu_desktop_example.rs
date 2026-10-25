@@ -26,6 +26,6 @@ fn stores_wizard_user_unencrypted() -> Result<()> {
 fn starts_display_manager() -> Result<()> {
     Command::new("systemctl")
         .args(["is-active", "graphical.target", "gdm.service"])
-        .output_string()?;
+        .run_get_string()?;
     Ok(())
 }

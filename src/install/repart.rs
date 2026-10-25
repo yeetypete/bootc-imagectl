@@ -96,9 +96,7 @@ pub(super) fn partition(
     if let Some(key_file) = key_file {
         command.arg(format!("--key-file={key_file}"));
     }
-    let output = command.arg(device).output_string()?;
-    let partitions: Vec<Partition> =
-        serde_json::from_str(&output).context("parsing systemd-repart's output")?;
+    let partitions: Vec<Partition> = command.arg(device).run_and_parse_json()?;
     find_partitions(&partitions)
 }
 

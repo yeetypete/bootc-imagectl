@@ -117,7 +117,7 @@ pub(super) fn finalize(root: &Dir) -> Result<()> {
     write_setup_root_conf(root)?;
     write_machine_id_unit(root)?;
     if root.exists("etc/ssh/sshd_config") {
-        let config = Command::new("sshd").arg("-G").output_string()?;
+        let config = Command::new("sshd").arg("-G").run_get_string()?;
         let keys = generated_host_keys(&config)?;
         write_sshd_keygen_unit(root)?;
         write_ssh_host_key_links(root, &keys)?;

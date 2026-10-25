@@ -123,7 +123,7 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
     if let Some(imgref) = &opts.target_imgref {
         bootc.arg(format!("--target-imgref={imgref}"));
     }
-    bootc.arg(&target).run()?;
+    bootc.arg(&target).run_inherited()?;
 
     info!("installed to {device}");
     if mapping.is_some() {
@@ -205,21 +205,21 @@ struct Lsblk {
 }
 
 /// The whole disks in `lsblk --json` output.
-fn disks(lsblk_json: &str) -> Result<Vec<Disk>> {
-    let lsblk: Lsblk = serde_json::from_str(lsblk_json).context("parsing lsblk's output")?;
-    Ok(lsblk
+fn disks(lsblk: Lsblk) -> Vec<Disk> {
+    lsblk
         .blockdevices
         .into_iter()
         .filter(|disk| disk.kind == "disk" && !disk.path.as_str().starts_with("/dev/zram"))
-        .collect())
+        .collect()
 }
 
 /// List the disks and ask which one to install to.
 fn prompt_disk() -> Result<Utf8PathBuf> {
-    let output = Command::new("lsblk")
-        .args(["--json", "--nodeps", "--output", "PATH,SIZE,MODEL,RM,TYPE"])
-        .output_string()?;
-    let mut disks = disks(&output)?;
+    let mut disks = disks(
+        Command::new("lsblk")
+            .args(["--json", "--nodeps", "--output", "PATH,SIZE,MODEL,RM,TYPE"])
+            .run_and_parse_json()?,
+    );
     ensure!(!disks.is_empty(), "found no disk to install to");
     println!("Disks:");
     for (number, disk) in disks.iter().enumerate() {
@@ -250,7 +250,7 @@ fn confirm(device: &Utf8Path) -> Result<()> {
     Command::new("lsblk")
         .args(["--output", "NAME,SIZE,FSTYPE,LABEL"])
         .arg(device)
-        .run()?;
+        .run_inherited()?;
     print!("Type {device} to confirm: ");
     io::stdout().flush()?;
     let mut answer = String::new();
@@ -290,7 +290,7 @@ fn remove_partitions(device: &Utf8Path) -> Result<()> {
     Command::new("wipefs")
         .args(["--all", "--quiet"])
         .arg(device)
-        .run()
+        .run_inherited()
 }
 
 /// Wait for udev to process a new partition. bootc reads partition types
@@ -299,7 +299,7 @@ fn wait_for_udev(node: &Utf8Path) -> Result<()> {
     Command::new("udevadm")
         .args(["wait", "--timeout=10"])
         .arg(node)
-        .run()
+        .run_inherited()
 }
 
 /// Whether `imgref` names an image in a registry, as `docker://` in
@@ -324,7 +324,7 @@ impl Mapping {
             // Persists the flag, so the installed system passes discards on.
             .args(["--allow-discards", "--persistent"])
             .args([partition.as_str(), MAPPING])
-            .run()?;
+            .run_inherited()?;
         Ok(Self {
             device: Utf8Path::new("/dev/mapper").join(MAPPING),
         })
@@ -333,7 +333,10 @@ impl Mapping {
 
 impl Drop for Mapping {
     fn drop(&mut self) {
-        if let Err(e) = Command::new("cryptsetup").args(["close", MAPPING]).run() {
+        if let Err(e) = Command::new("cryptsetup")
+            .args(["close", MAPPING])
+            .run_inherited()
+        {
             warn!("closing {MAPPING}: {e:#}");
         }
     }
@@ -430,8 +433,7 @@ mod tests {
             {"path":"/dev/sr0", "size":"2.6G", "model":"DVD", "rm":true, "type":"rom"},
             {"path":"/dev/zram0", "size":"4G", "model":null, "rm":false, "type":"disk"}
         ]}"#;
-        let paths: Vec<_> = disks(output)
-            .unwrap()
+        let paths: Vec<_> = disks(serde_json::from_str(output).unwrap())
             .into_iter()
             .map(|disk| disk.path)
             .collect();

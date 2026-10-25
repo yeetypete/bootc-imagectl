@@ -12,7 +12,9 @@ const MIN_VERSION: u32 = 255;
 
 /// Fail if the image's systemd is older than [`MIN_VERSION`].
 pub(super) fn check() -> Result<()> {
-    let output = Command::new("systemctl").arg("--version").output_string()?;
+    let output = Command::new("systemctl")
+        .arg("--version")
+        .run_get_string()?;
     let version = parse_version(&output)?;
     ensure!(
         version >= MIN_VERSION,

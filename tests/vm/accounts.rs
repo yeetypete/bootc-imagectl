@@ -40,7 +40,7 @@ pub(crate) fn resolves_through_nss(user: &MovedUser) -> Result<()> {
 
     let shadow = Command::new("getent")
         .args(["shadow", user.name])
-        .output_string()?;
+        .run_get_string()?;
     assert!(shadow.starts_with(&format!("{}:$", user.name)), "{shadow}");
     Ok(())
 }
@@ -76,7 +76,7 @@ pub(crate) fn accepts_password(user: &MovedUser) -> Result<()> {
 fn keeps_account_files_unchanged_after_first_boot() -> Result<()> {
     let result = Command::new("systemctl")
         .args(["show", "-P", "Result", "systemd-sysusers.service"])
-        .output_string()?;
+        .run_get_string()?;
     assert_eq!(result.trim(), "success");
 
     // Check that the boot rewrote no account file. /etc is an overlay, so a

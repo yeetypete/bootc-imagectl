@@ -245,7 +245,7 @@ pub(super) fn finalize(root: &Dir) -> Result<()> {
     // systemctl, e.g. Debian's display-manager.service alias.
     Command::new("systemctl")
         .args(["preset-all", "--root=/", "--preset-mode=enable-only"])
-        .run()
+        .run_inherited()
 }
 
 #[cfg(test)]

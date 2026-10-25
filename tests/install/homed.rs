@@ -15,7 +15,7 @@ const USER: &str = "alice";
 pub(crate) fn adds_wizard_user_to(groups: &[&str]) -> Result<()> {
     Command::new("homectl")
         .args(["inspect", USER])
-        .output_string()?;
+        .run_get_string()?;
     let user = uzers::get_user_by_name(USER).expect("the user resolves through NSS");
     let found: Vec<String> = uzers::get_user_groups(USER, user.primary_group_id())
         .expect("the groups of the user")
@@ -50,10 +50,9 @@ fn from_usec<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SystemTime, D
 
 /// The user record of the wizard's user.
 pub(crate) fn user_record() -> Result<UserRecord> {
-    let output = Command::new("homectl")
+    Command::new("homectl")
         .args(["inspect", "--json=short", USER])
-        .output_string()?;
-    Ok(serde_json::from_str(&output)?)
+        .run_and_parse_json()
 }
 
 /// The `binding` section of a user record for one machine.
