@@ -21,7 +21,7 @@ use cap_std_ext::dirext::CapStdExtDirExtUtf8;
 use tracing::{debug, info};
 
 use super::GENERATED_HEADER;
-use super::units::{self, EnablementState, UnitFile, UnitName};
+use super::units::{self, EnablementState, Instance, Template, UnitFile, UnitName};
 use crate::command::CommandRunExt;
 
 /// Where packages install their system preset files.
@@ -66,37 +66,50 @@ impl fmt::Display for Action {
 
 /// A directive of a preset file, as systemd.preset(5) defines it.
 #[derive(Debug, PartialEq, Eq)]
-struct Directive {
-    action: Action,
-    /// A unit name, which may contain shell-style wildcards.
-    pattern: String,
-    /// The instances to enable instead of the default one, for a template
-    /// unit.
-    instances: Vec<String>,
+enum Directive {
+    /// E.g. `disable *.socket`.
+    Pattern {
+        action: Action,
+        /// A unit name, which may contain shell-style wildcards.
+        pattern: String,
+    },
+    /// E.g. `enable getty@.service tty1 tty2`, which enables these instances
+    /// instead of the template's default instance.
+    EnableInstances {
+        template: Template,
+        instances: BTreeSet<Instance>,
+    },
 }
 
 impl Directive {
-    fn new(action: Action, pattern: &str) -> Self {
-        Self {
+    fn pattern(action: Action, pattern: &str) -> Self {
+        Self::Pattern {
             action,
             pattern: pattern.to_owned(),
-            instances: Vec::new(),
         }
     }
 
     /// Whether the directive matches every unit.
     fn is_catchall(&self) -> bool {
-        self.pattern == "*"
+        matches!(self, Self::Pattern { pattern, .. } if pattern == "*")
     }
 }
 
 impl fmt::Display for Directive {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.action, self.pattern)?;
-        for instance in &self.instances {
-            write!(f, " {instance}")?;
+        match self {
+            Self::Pattern { action, pattern } => write!(f, "{action} {pattern}"),
+            Self::EnableInstances {
+                template,
+                instances,
+            } => {
+                write!(f, "{} {template}", Action::Enable)?;
+                for instance in instances {
+                    write!(f, " {}", instance.instance())?;
+                }
+                Ok(())
+            }
         }
-        Ok(())
     }
 }
 
@@ -104,17 +117,35 @@ impl FromStr for Directive {
     type Err = anyhow::Error;
 
     fn from_str(line: &str) -> Result<Self> {
-        let mut words = line.split_whitespace();
-        let action = words
-            .next()
-            .and_then(|word| word.parse().ok())
+        let (action, rest) = line
+            .trim()
+            .split_once(char::is_whitespace)
             .with_context(|| format!("{line:?} is not a preset directive"))?;
+        let action: Action = action.parse()?;
+        // Only enable lines list instances. systemd reads the rest of a
+        // disable or ignore line as one pattern, e.g. `disable * foo` has the
+        // pattern `* foo`.
+        if action != Action::Enable {
+            return Ok(Self::pattern(action, rest.trim_start()));
+        }
+        let mut words = rest.split_whitespace();
         let pattern = words
             .next()
             .with_context(|| format!("{line:?} has no unit name"))?;
-        Ok(Self {
-            instances: words.map(str::to_owned).collect(),
-            ..Self::new(action, pattern)
+        let mut instances = words.peekable();
+        if instances.peek().is_none() {
+            return Ok(Self::pattern(action, pattern));
+        }
+        let template: Template = pattern
+            .parse()
+            .with_context(|| format!("{line:?} lists instances of {pattern}"))?;
+        let instances = instances
+            .map(|instance| template.instance(instance))
+            .collect::<Result<_>>()
+            .with_context(|| format!("parsing {line:?}"))?;
+        Ok(Self::EnableInstances {
+            template,
+            instances,
         })
     }
 }
@@ -122,19 +153,23 @@ impl FromStr for Directive {
 /// The directives that enable the units the image enables.
 fn enable_directives(
     units: &[UnitFile],
-    instances: &BTreeMap<String, BTreeSet<String>>,
+    mut instances: BTreeMap<Template, BTreeSet<Instance>>,
 ) -> Vec<Directive> {
     units
         .iter()
-        .filter_map(|unit| match UnitName::from(unit.name.as_str()) {
+        .filter_map(|unit| match &unit.name {
             // For a template unit, the directive enables only the instances
             // it lists.
-            UnitName::Template => instances.get(&unit.name).map(|instances| Directive {
-                instances: instances.iter().cloned().collect(),
-                ..Directive::new(Action::Enable, &unit.name)
-            }),
-            UnitName::Plain if unit.state == EnablementState::Enabled => {
-                Some(Directive::new(Action::Enable, &unit.name))
+            UnitName::Template(template) => {
+                instances
+                    .remove(template)
+                    .map(|instances| Directive::EnableInstances {
+                        template: template.clone(),
+                        instances,
+                    })
+            }
+            UnitName::Plain(name) if unit.state == EnablementState::Enabled => {
+                Some(Directive::pattern(Action::Enable, name))
             }
             _ => None,
         })
@@ -188,7 +223,7 @@ pub(super) fn finalize(root: &Dir) -> Result<()> {
         .with_context(|| format!("creating /{PRESET_DIR}"))?;
 
     let units = units::unit_files()?;
-    let directives = enable_directives(&units, &units::enabled_instances(&units)?);
+    let directives = enable_directives(&units, units::enabled_instances(&units)?);
     if !directives.is_empty() {
         write(root, PRESET_FILE, &directives)?;
         info!("recorded {} units in /{PRESET_FILE}", directives.len());
@@ -201,7 +236,7 @@ pub(super) fn finalize(root: &Dir) -> Result<()> {
         write(
             root,
             DEFAULT_PRESET_FILE,
-            &[Directive::new(Action::Disable, "*")],
+            &[Directive::pattern(Action::Disable, "*")],
         )?;
         info!("the preset policy has no catchall, wrote /{DEFAULT_PRESET_FILE}");
     }
@@ -232,17 +267,19 @@ mod tests {
               {"unit_file": "foo.service", "state": "something-new", "preset": "ignored"}
             ]
         "#})?;
-        let instances = BTreeMap::from([
-            (
-                "getty@.service".to_owned(),
-                BTreeSet::from(["tty2".to_owned()]),
-            ),
-            (
-                "serial-getty@.service".to_owned(),
-                BTreeSet::from(["ttyS1".to_owned(), "ttyS0".to_owned()]),
-            ),
-        ]);
-        let directives: Vec<String> = enable_directives(&units, &instances)
+        let mut instances = BTreeMap::<_, BTreeSet<_>>::new();
+        for name in [
+            "getty@tty2.service",
+            "serial-getty@ttyS1.service",
+            "serial-getty@ttyS0.service",
+        ] {
+            let instance: Instance = name.parse()?;
+            instances
+                .entry(instance.template().clone())
+                .or_default()
+                .insert(instance);
+        }
+        let directives: Vec<String> = enable_directives(&units, instances)
             .iter()
             .map(ToString::to_string)
             .collect();
@@ -261,6 +298,7 @@ mod tests {
     fn parses_directives() -> Result<()> {
         for line in [
             "enable getty@.service tty2 tty3",
+            "enable sshd.service",
             "disable *",
             "ignore foo.service",
         ] {
@@ -268,12 +306,25 @@ mod tests {
         }
         assert_eq!(
             " disable  *.socket ".parse::<Directive>()?,
-            Directive::new(Action::Disable, "*.socket")
+            Directive::pattern(Action::Disable, "*.socket")
+        );
+        assert_eq!(
+            "disable * foo".parse::<Directive>()?,
+            Directive::pattern(Action::Disable, "* foo")
+        );
+        assert_eq!(
+            "enable getty@.service tty3 tty2"
+                .parse::<Directive>()?
+                .to_string(),
+            "enable getty@.service tty2 tty3"
         );
         for line in [
             "# /usr/lib/systemd/system-preset/90-systemd.preset",
             "enable",
+            "disable ",
             "",
+            "enable sshd.service tty1",
+            "enable getty@tty1.service tty2",
         ] {
             assert!(line.parse::<Directive>().is_err(), "{line:?}");
         }
@@ -292,6 +343,11 @@ mod tests {
             let policy: Policy = format!("{config}{catchall}\n").parse()?;
             assert!(policy.has_catchall(), "{catchall:?}");
         }
+        assert!(
+            !format!("{config}disable * foo\n")
+                .parse::<Policy>()?
+                .has_catchall()
+        );
         assert!(format!("{config}bogus *\n").parse::<Policy>().is_err());
         Ok(())
     }

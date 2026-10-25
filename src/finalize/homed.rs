@@ -42,7 +42,7 @@ const DROPIN: &str = "50-bootc-imagectl.conf";
 /// be extended.
 pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
     let unit_files = units::unit_files()?;
-    if !unit_files.iter().any(|unit| unit.name == HOMED) {
+    if !unit_files.iter().any(|unit| unit.name.as_str() == HOMED) {
         return Ok(());
     }
     write_config(root)?;
