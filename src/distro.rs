@@ -144,6 +144,16 @@ fn from_id(id: &str) -> Option<&'static dyn Distro> {
     }
 }
 
+/// The rootfs's os-release `VERSION_ID`, e.g. `24.04`. Rolling releases
+/// such as Arch have none.
+///
+/// # Errors
+///
+/// Fails if os-release is missing or malformed.
+pub fn version_id(root: &Dir) -> Result<Option<String>> {
+    Ok(os_release::read(root)?.version_id)
+}
+
 /// Detect the distribution from the rootfs's os-release.
 ///
 /// # Errors
