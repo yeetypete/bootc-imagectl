@@ -3,6 +3,7 @@
 
 use std::fmt;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
@@ -146,6 +147,36 @@ const IMAGE_ENV: &str = "BOOTC_IMAGECTL_TEST_IMAGE";
 /// xtask sets.
 const FEATURES_ENV: &str = "BOOTC_IMAGECTL_TEST_FEATURES";
 
+/// A feature the xtask reports for the image under test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Feature {
+    /// systemd-homed's first boot wizard creates the regular user.
+    Homed,
+    /// The image has a transient /etc.
+    TransientEtc,
+}
+
+impl FromStr for Feature {
+    type Err = anyhow::Error;
+
+    fn from_str(name: &str) -> Result<Self> {
+        match name {
+            "homed" => Ok(Self::Homed),
+            "transient-etc" => Ok(Self::TransientEtc),
+            _ => bail!("unknown feature {name}"),
+        }
+    }
+}
+
+impl fmt::Display for Feature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Homed => "systemd-homed",
+            Self::TransientEtc => "a transient /etc",
+        })
+    }
+}
+
 /// What a test needs from the image under test to apply to it.
 #[derive(Debug)]
 pub enum Requirement {
@@ -153,12 +184,10 @@ pub enum Requirement {
     Distro(&'static [&'static str]),
     /// The image has this tag.
     Image(&'static str),
-    /// systemd-homed's first boot wizard creates the regular user.
-    Homed,
-    /// A regular user is baked into the image.
+    /// The image has this feature.
+    Feature(Feature),
+    /// A regular user is baked into the image, so it lacks [`Feature::Homed`].
     RegularUser,
-    /// The image has a transient /etc.
-    TransientEtc,
 }
 
 impl fmt::Display for Requirement {
@@ -166,9 +195,8 @@ impl fmt::Display for Requirement {
         match self {
             Self::Distro(distros) => write!(f, "{}", distros.join(" or ")),
             Self::Image(tag) => write!(f, "the {tag} image"),
-            Self::Homed => f.write_str("systemd-homed"),
+            Self::Feature(feature) => feature.fmt(f),
             Self::RegularUser => f.write_str("a regular user"),
-            Self::TransientEtc => f.write_str("a transient /etc"),
         }
     }
 }
@@ -209,7 +237,7 @@ pub struct TestImage {
     pub reference: String,
     /// The image's distribution, by os-release `ID`.
     pub distro: &'static str,
-    features: Vec<String>,
+    features: Vec<Feature>,
 }
 
 /// The image the running suite tests.
@@ -230,8 +258,9 @@ impl TestImage {
             .with_context(|| format!("reading {FEATURES_ENV}"))?
             .split(',')
             .filter(|feature| !feature.is_empty())
-            .map(str::to_owned)
-            .collect();
+            .map(str::parse)
+            .collect::<Result<_>>()
+            .with_context(|| format!("parsing {FEATURES_ENV}"))?;
         let root = Dir::open_ambient_dir("/", ambient_authority()).context("opening /")?;
         Ok(Self {
             reference,
@@ -247,17 +276,12 @@ impl TestImage {
             .map_or(&self.reference, |(_, tag)| tag)
     }
 
-    fn has(&self, feature: &str) -> bool {
-        self.features.iter().any(|found| found == feature)
-    }
-
     fn meets(&self, requirement: &Requirement) -> bool {
         match requirement {
             Requirement::Distro(distros) => distros.contains(&self.distro),
             Requirement::Image(tag) => self.tag() == *tag,
-            Requirement::Homed => self.has("homed"),
-            Requirement::RegularUser => !self.has("homed"),
-            Requirement::TransientEtc => self.has("transient-etc"),
+            Requirement::Feature(feature) => self.features.contains(feature),
+            Requirement::RegularUser => !self.features.contains(&Feature::Homed),
         }
     }
 }

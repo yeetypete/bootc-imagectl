@@ -7,7 +7,7 @@ use std::process::Command;
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
 use bootc_imagectl::finalize::{DBUS_MACHINE_ID, PULL_SECRET, PULL_SECRET_LINK, SSH_HOST_KEY_DIR};
-use bootc_imagectl::testing::{Requirement, Test, boot_time, written_before_boot};
+use bootc_imagectl::testing::{Feature, Requirement, Test, boot_time, written_before_boot};
 use bootc_imagectl::trial;
 use camino::Utf8Path;
 
@@ -78,7 +78,7 @@ fn links_pull_secret() -> Result<()> {
     Ok(())
 }
 
-const REQUIRES: &[Requirement] = &[Requirement::TransientEtc];
+const REQUIRES: &[Requirement] = &[Requirement::Feature(Feature::TransientEtc)];
 
 pub(crate) const TESTS: &[Test] = &[
     trial!(mounts_etc_transient, REQUIRES),

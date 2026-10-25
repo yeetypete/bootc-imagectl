@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
-use bootc_imagectl::testing::{self, Requirement, Test};
+use bootc_imagectl::testing::{self, Feature, Requirement, Test};
 use bootc_imagectl::trial;
 use serde::{Deserialize, Deserializer};
 
@@ -89,7 +89,7 @@ fn stores_wizard_user_unencrypted() -> Result<()> {
     Ok(())
 }
 
-const REQUIRES: &[Requirement] = &[Requirement::Homed];
+const REQUIRES: &[Requirement] = &[Requirement::Feature(Feature::Homed)];
 
 pub(crate) const TESTS: &[Test] = &[
     trial!(adds_wizard_user_to_groups, REQUIRES),
