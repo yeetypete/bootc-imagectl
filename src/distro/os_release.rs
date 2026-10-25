@@ -11,8 +11,6 @@ pub(super) struct OsRelease {
     pub id: String,
     /// `ID_LIKE`: distributions this one derives from, closest first.
     pub id_like: Vec<String>,
-    /// `VERSION_ID`: the release, e.g. `24.04`. Rolling releases have none.
-    pub version_id: Option<String>,
 }
 
 impl OsRelease {
@@ -41,7 +39,6 @@ pub(super) fn read(root: &Dir) -> Result<OsRelease> {
 fn parse(content: &str) -> Result<OsRelease> {
     let mut id = None;
     let mut id_like = Vec::new();
-    let mut version_id = None;
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -54,18 +51,13 @@ fn parse(content: &str) -> Result<OsRelease> {
         match key.trim() {
             "ID" => id = Some(value.to_owned()),
             "ID_LIKE" => id_like = value.split_whitespace().map(str::to_owned).collect(),
-            "VERSION_ID" => version_id = Some(value.to_owned()),
             _ => {}
         }
     }
     let Some(id) = id else {
         bail!("os-release has no ID field")
     };
-    Ok(OsRelease {
-        id,
-        id_like,
-        version_id,
-    })
+    Ok(OsRelease { id, id_like })
 }
 
 /// Strip one layer of matching quotes.
@@ -133,7 +125,6 @@ mod tests {
             NAME="Ubuntu"
             ID=ubuntu
             ID_LIKE='debian'
-            VERSION_ID="24.04"
 
             MALFORMED LINE
         "#})?;
@@ -142,7 +133,6 @@ mod tests {
             OsRelease {
                 id: "ubuntu".into(),
                 id_like: vec!["debian".into()],
-                version_id: Some("24.04".into()),
             }
         );
         Ok(())

@@ -93,39 +93,32 @@ pub struct ImageAccounts {
 ///
 /// Fails if the distribution has no test image.
 pub fn image_accounts() -> Result<&'static ImageAccounts> {
-    let image = image();
-    Ok(match (image.distro, image.version.as_deref()) {
-        ("arch", _) => &ImageAccounts {
+    Ok(match image().distro {
+        "arch" => &ImageAccounts {
             system_users: &[("avahi", 969), ("uuidd", 970)],
             user: ("archie", 1000),
             password: "archie",
             group: "wheel",
         },
-        ("debian", _) => &ImageAccounts {
+        "debian" => &ImageAccounts {
             system_users: &[("sshd", 990), ("systemd-network", 997)],
             user: ("debian", 1000),
             password: "debian",
             group: "sudo",
         },
-        ("fedora", _) => &ImageAccounts {
+        "fedora" => &ImageAccounts {
             system_users: &[("systemd-coredump", 997), ("systemd-oom", 998)],
             user: ("fedora", 1000),
             password: "fedora",
             group: "wheel",
         },
-        ("ubuntu", Some("24.04")) => &ImageAccounts {
-            system_users: &[("sshd", 100), ("systemd-network", 998)],
-            user: ("ubuntu", 1000),
-            password: "ubuntu",
-            group: "sudo",
-        },
-        ("ubuntu", _) => &ImageAccounts {
+        "ubuntu" => &ImageAccounts {
             system_users: &[("sshd", 992), ("systemd-network", 998)],
             user: ("ubuntu", 1000),
             password: "ubuntu",
             group: "sudo",
         },
-        (name, _) => bail!("no test image for {name}"),
+        name => bail!("no test image for {name}"),
     })
 }
 
