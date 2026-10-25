@@ -5,10 +5,11 @@ use std::process::Command;
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
 use bootc_imagectl::distro::{self, PackageName};
+use bootc_imagectl::testing::Test;
+use bootc_imagectl::trial;
 use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::{ambient_authority, fs_utf8};
 
-#[test]
 fn boots_to_running() -> Result<()> {
     let state = Command::new("systemctl")
         .args(["is-system-running", "--wait"])
@@ -17,7 +18,6 @@ fn boots_to_running() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn queries_packages_from_moved_database() -> Result<()> {
     let distro = distro::detect(&fs_utf8::Dir::open_ambient_dir("/", ambient_authority())?)?;
     let bash: PackageName = "bash".parse()?;
@@ -29,3 +29,8 @@ fn queries_packages_from_moved_database() -> Result<()> {
     );
     Ok(())
 }
+
+pub(crate) const TESTS: &[Test] = &[
+    trial!(boots_to_running),
+    trial!(queries_packages_from_moved_database),
+];

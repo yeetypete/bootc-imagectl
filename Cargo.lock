@@ -95,6 +95,7 @@ dependencies = [
  "clap",
  "flate2",
  "indoc",
+ "libtest-mimic",
  "rpassword",
  "rustix",
  "serde",
@@ -279,6 +280,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "escape8259"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f1f0d310082fd5de539d4f41601182241147498444a7695c520288a0cdbead6"
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -447,6 +454,18 @@ name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+
+[[package]]
+name = "libtest-mimic"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14e6ba06f0ade6e504aff834d7c34298e5155c6baca353cc6a4aaff2f9fd7f33"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap",
+ "escape8259",
+]
 
 [[package]]
 name = "linux-raw-sys"

@@ -3,11 +3,11 @@
 use std::path::Path;
 
 use anyhow::Result;
-use bootc_imagectl::testing::written_before_boot;
+use bootc_imagectl::testing::{Test, written_before_boot};
+use bootc_imagectl::trial;
 
 /// The first boot, which applied the systemd presets, changed no symlink in
 /// /etc/systemd/system.
-#[test]
 fn keeps_units_unchanged_after_first_boot() -> Result<()> {
     // Enabling a unit creates a symlink and disabling one removes it. Either
     // updates the mtime of the symlink's directory.
@@ -28,3 +28,5 @@ fn assert_written_before_boot(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+pub(crate) const TESTS: &[Test] = &[trial!(keeps_units_unchanged_after_first_boot)];

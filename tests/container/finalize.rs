@@ -8,6 +8,8 @@ use std::sync::LazyLock;
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
 use bootc_imagectl::distro::{self, PackageName};
+use bootc_imagectl::testing::Test;
+use bootc_imagectl::trial;
 use cap_std_ext::camino::Utf8Path;
 use cap_std_ext::cap_std::fs::{Dir, MetadataExt};
 use cap_std_ext::cap_std::{ambient_authority, fs_utf8};
@@ -47,7 +49,6 @@ pub(crate) fn initramfs_paths() -> Result<Vec<String>> {
         .collect())
 }
 
-#[test]
 fn lays_out_toplevel() -> Result<()> {
     for (link, target) in [
         ("home", "var/home"),
@@ -75,7 +76,6 @@ fn lays_out_toplevel() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn patches_systemd_tmpfiles() -> Result<()> {
     assert!(!ROOT.exists("usr/lib/tmpfiles.d/home.conf"));
     let provision = ROOT.read_to_string("usr/lib/tmpfiles.d/provision.conf")?;
@@ -84,7 +84,6 @@ fn patches_systemd_tmpfiles() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn skips_declared_paths_in_var_tmpfiles() -> Result<()> {
     let var = var_tmpfiles()?;
     assert!(
@@ -102,7 +101,6 @@ fn skips_declared_paths_in_var_tmpfiles() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn sets_up_tmp_run_and_lock_in_var() -> Result<()> {
     assert_eq!(ROOT.metadata("var/tmp")?.mode() & 0o7777, 0o1777);
     assert_eq!(ROOT.read_link("var/run")?, Path::new("../run"));
@@ -124,7 +122,6 @@ pub(crate) fn preset_changes(mode: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-#[test]
 fn records_enabled_units_in_presets() -> Result<()> {
     let presets = ROOT.read_to_string("usr/lib/systemd/system-preset/10-bootc-imagectl.preset")?;
     assert!(
@@ -137,7 +134,6 @@ fn records_enabled_units_in_presets() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn ends_presets_with_catchall() -> Result<()> {
     // Without a catchall, the first boot would enable every unit.
     let presets = Command::new("systemd-analyze")
@@ -147,7 +143,6 @@ fn ends_presets_with_catchall() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn applies_preset_policy() -> Result<()> {
     // The first boot applies the policy again, so it must find nothing to
     // enable.
@@ -156,7 +151,6 @@ fn applies_preset_policy() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn removes_machine_identity() -> Result<()> {
     assert_eq!(ROOT.read("etc/machine-id")?, b"uninitialized\n");
     assert!(!ROOT.exists("etc/fstab"));
@@ -169,7 +163,6 @@ fn removes_machine_identity() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn boots_from_uki() -> Result<()> {
     let [kver] = names("usr/lib/modules")?.try_into().expect("one kernel");
     let kver = kver.display();
@@ -181,7 +174,6 @@ fn boots_from_uki() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn initramfs_resolves_users_through_nss_systemd() -> Result<()> {
     let paths = initramfs_paths()?;
     assert!(paths.iter().any(|path| path == "etc/nsswitch.conf"));
@@ -200,7 +192,6 @@ fn initramfs_resolves_users_through_nss_systemd() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn queries_packages_from_moved_database() -> Result<()> {
     let distro = distro::detect(&fs_utf8::Dir::from_cap_std(ROOT.try_clone()?))?;
     let bash: PackageName = "bash".parse()?;
@@ -212,3 +203,17 @@ fn queries_packages_from_moved_database() -> Result<()> {
     );
     Ok(())
 }
+
+pub(crate) const TESTS: &[Test] = &[
+    trial!(lays_out_toplevel),
+    trial!(patches_systemd_tmpfiles),
+    trial!(skips_declared_paths_in_var_tmpfiles),
+    trial!(sets_up_tmp_run_and_lock_in_var),
+    trial!(records_enabled_units_in_presets),
+    trial!(ends_presets_with_catchall),
+    trial!(applies_preset_policy),
+    trial!(removes_machine_identity),
+    trial!(boots_from_uki),
+    trial!(initramfs_resolves_users_through_nss_systemd),
+    trial!(queries_packages_from_moved_database),
+];

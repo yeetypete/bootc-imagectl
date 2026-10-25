@@ -13,6 +13,10 @@ use minijinja::{Environment, UndefinedBehavior, Value, context};
 /// The extension of template files.
 const TEMPLATE_EXTENSION: &str = "j2";
 
+/// The examples without a regular user, whose user systemd-homed's first
+/// boot wizard creates.
+const HOMED_EXAMPLES: &[&str] = &["ubuntu-desktop", "ubuntu-transient-etc"];
+
 /// The examples with a transient /etc.
 const TRANSIENT_ETC_EXAMPLES: &[&str] = &["ubuntu-transient-etc"];
 
@@ -77,6 +81,15 @@ pub(crate) struct Image {
 }
 
 impl Image {
+    /// Whether systemd-homed's first boot wizard creates the image's regular
+    /// user.
+    pub(crate) fn homed(&self) -> bool {
+        match self.source {
+            Source::Test => self.variant != Variant::Default,
+            Source::Example => HOMED_EXAMPLES.contains(&self.name.as_str()),
+        }
+    }
+
     /// Whether the image has a transient /etc.
     pub(crate) fn transient_etc(&self) -> bool {
         match self.source {
@@ -103,9 +116,20 @@ impl Image {
         }
     }
 
-    /// The module holding the image's tests, named after its tag.
-    pub(crate) fn module(&self) -> String {
-        self.tag().replace('-', "_")
+    /// The environment that tells the test binary it runs against this image,
+    /// built as `reference`, as `NAME=VALUE`.
+    pub(crate) fn test_env(&self, reference: &str) -> [String; 2] {
+        let features: Vec<&str> = [
+            ("homed", self.homed()),
+            ("transient-etc", self.transient_etc()),
+        ]
+        .into_iter()
+        .filter_map(|(feature, has)| has.then_some(feature))
+        .collect();
+        [
+            format!("BOOTC_IMAGECTL_TEST_IMAGE={reference}"),
+            format!("BOOTC_IMAGECTL_TEST_FEATURES={}", features.join(",")),
+        ]
     }
 
     /// Render the image from the workspace at `root` into `out`, replacing

@@ -1,6 +1,8 @@
 //! Check how finalize configured systemd-homed's first boot wizard.
 
 use anyhow::Result;
+use bootc_imagectl::testing::{self, Requirement, Test};
+use bootc_imagectl::trial;
 
 use crate::finalize::ROOT;
 
@@ -8,9 +10,9 @@ use crate::finalize::ROOT;
 const DROPIN: &str =
     "usr/lib/systemd/system/systemd-homed-firstboot.service.d/50-bootc-imagectl.conf";
 
-/// The wizard adds the user it creates to `groups`.
-pub(crate) fn adds_wizard_user_to(groups: &[&str]) -> Result<()> {
+fn adds_wizard_user_to_groups() -> Result<()> {
     let dropin = ROOT.read_to_string(DROPIN)?;
+    let groups = testing::wizard_groups()?;
     let suffix = format!(" --member-of={}", groups.join(","));
     assert!(
         dropin
@@ -20,3 +22,7 @@ pub(crate) fn adds_wizard_user_to(groups: &[&str]) -> Result<()> {
     );
     Ok(())
 }
+
+const REQUIRES: &[Requirement] = &[Requirement::Homed];
+
+pub(crate) const TESTS: &[Test] = &[trial!(adds_wizard_user_to_groups, REQUIRES)];

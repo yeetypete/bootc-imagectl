@@ -4,6 +4,8 @@ use std::process::Command;
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
+use bootc_imagectl::testing::{self, Test};
+use bootc_imagectl::trial;
 use serde::Deserialize;
 
 /// The host status, as reported by `bootc status --json`.
@@ -33,13 +35,15 @@ struct ImageReference {
     transport: String,
 }
 
-/// The booted deployment updates from `imgref` in a registry.
-pub(crate) fn updates_from(imgref: &str) -> Result<()> {
+/// The booted deployment updates from the image under test in a registry.
+fn updates_from_target_imgref() -> Result<()> {
     let host: Host = Command::new("bootc")
         .args(["status", "--json"])
         .run_and_parse_json()?;
     let reference = host.status.booted.image.image;
-    assert_eq!(reference.image, imgref);
+    assert_eq!(reference.image, testing::image().reference);
     assert_eq!(reference.transport, "registry");
     Ok(())
 }
+
+pub(crate) const TESTS: &[Test] = &[trial!(updates_from_target_imgref)];

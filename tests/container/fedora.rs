@@ -4,10 +4,10 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::accounts::{self, MovedAccounts};
 use crate::finalize::{ROOT, names, preset_changes, var_tmpfiles};
+use bootc_imagectl::testing::{Requirement, Test};
+use bootc_imagectl::trial;
 
-#[test]
 fn applies_full_preset_policy() -> Result<()> {
     // finalize runs `systemctl preset-all --preset-mode=enable-only`, which
     // never disables a unit. On Fedora, the first boot runs `systemctl
@@ -18,7 +18,6 @@ fn applies_full_preset_policy() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn keeps_rpm_database_under_usr() -> Result<()> {
     assert!(ROOT.exists("usr/lib/sysimage/rpm/rpmdb.sqlite"));
     assert_eq!(
@@ -28,50 +27,11 @@ fn keeps_rpm_database_under_usr() -> Result<()> {
     Ok(())
 }
 
-/// The image's package users and its regular user.
-const FEDORA: MovedAccounts = MovedAccounts {
-    system_users: &[("systemd-coredump", 997), ("systemd-oom", 998)],
-    user: ("fedora", 1000),
-    group: "wheel",
-};
-
-#[test]
-fn locks_uids_of_package_users() {
-    accounts::locks_uids(&FEDORA);
-}
-
-#[test]
-fn moves_accounts_out_of_etc_and_resolves_them_through_nss() -> Result<()> {
-    accounts::moves_accounts_out_of_etc(&FEDORA)
-}
-
-#[test]
-fn writes_user_records_to_userdb() -> Result<()> {
-    accounts::writes_user_records(&FEDORA)
-}
-
-#[test]
-fn writes_group_records_to_userdb() -> Result<()> {
-    accounts::writes_group_records(&FEDORA)
-}
-
-#[test]
-fn writes_privileged_records_for_users_with_passwords() -> Result<()> {
-    accounts::writes_privileged_records(&FEDORA)
-}
-
-#[test]
-fn writes_membership_files_for_primary_and_auxiliary_groups() -> Result<()> {
-    accounts::writes_membership_files(&FEDORA)
-}
-
-#[test]
 fn keeps_only_expected_entries_in_var() -> Result<()> {
     assert_eq!(names("var")?, ["lib", "lock", "run", "tmp"]);
     Ok(())
 }
 
-#[test]
 fn records_var_entries_in_tmpfiles() -> Result<()> {
     let var = var_tmpfiles()?;
     assert!(
@@ -85,7 +45,11 @@ fn records_var_entries_in_tmpfiles() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn initramfs_contains_user_records() -> Result<()> {
-    accounts::initramfs_contains_user_records(&FEDORA)
-}
+const REQUIRES: &[Requirement] = &[Requirement::Distro(&["fedora"])];
+
+pub(crate) const TESTS: &[Test] = &[
+    trial!(applies_full_preset_policy, REQUIRES),
+    trial!(keeps_rpm_database_under_usr, REQUIRES),
+    trial!(keeps_only_expected_entries_in_var, REQUIRES),
+    trial!(records_var_entries_in_tmpfiles, REQUIRES),
+];

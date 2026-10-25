@@ -35,18 +35,21 @@ unsafe_code = "forbid"
 name = "container"
 path = "tests/container/main.rs"
 required-features = ["container"]
+harness = false
 
 # The VM tests, see tests/vm/main.rs.
 [[test]]
 name = "vm"
 path = "tests/vm/main.rs"
 required-features = ["vm"]
+harness = false
 
 # The install tests, see tests/install/main.rs.
 [[test]]
 name = "install"
 path = "tests/install/main.rs"
 required-features = ["install"]
+harness = false
 
 [dependencies]
 anyhow = { workspace = true }
@@ -54,6 +57,7 @@ camino = { version = "1", features = ["serde1"] }
 cap-std-ext = { version = "5", features = ["fs_utf8"] }
 clap = { workspace = true }
 flate2 = "1"
+libtest-mimic = { version = "0.8", optional = true }
 rpassword = "7"
 rustix = { version = "1", features = ["mount", "process", "time"] }
 serde = { version = "1", features = ["derive"] }
@@ -71,9 +75,9 @@ static_assertions = "1"
 uzers = { version = "0.12", default-features = false, features = ["mock"] }
 
 [features]
-container = []
-install = []
-vm = []
+container = ["dep:libtest-mimic"]
+install = ["dep:libtest-mimic"]
+vm = ["dep:libtest-mimic"]
 
 [lints]
 workspace = true

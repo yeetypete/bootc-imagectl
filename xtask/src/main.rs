@@ -180,9 +180,9 @@ impl Suite {
         args: &[OsString],
     ) -> Result<()> {
         match self {
-            Self::Container => container::run(sh, reference, binary, args),
-            Self::Vm => vm::run(sh, reference, binary, args),
-            Self::Install => install::run(sh, reference, image.transient_etc(), binary, args),
+            Self::Container => container::run(sh, image, reference, binary, args),
+            Self::Vm => vm::run(sh, image, reference, binary, args),
+            Self::Install => install::run(sh, image, reference, binary, args),
         }
     }
 }
@@ -313,8 +313,7 @@ fn find_image<'a>(variants: &'a [images::Image], tag: &str) -> Result<&'a images
 }
 
 /// Build each of the suite's selected images and run the test binary
-/// against it. The tests of the other images live in modules named after
-/// them and are skipped.
+/// against it. The binary ignores the tests that do not apply to the image.
 fn run(
     sh: &Shell,
     build: &Build,
@@ -331,10 +330,6 @@ fn run(
     for image in selected {
         let reference = build_image(sh, build, image, target)?;
         let mut args = args.to_vec();
-        for other in variants.iter().filter(|other| *other != image) {
-            args.push("--skip".into());
-            args.push(format!("{}::", other.module()).into());
-        }
         let color = if std::io::stdout().is_terminal() {
             "always"
         } else {

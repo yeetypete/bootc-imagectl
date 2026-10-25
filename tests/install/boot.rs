@@ -5,6 +5,8 @@ use std::process::Command;
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
+use bootc_imagectl::testing::Test;
+use bootc_imagectl::trial;
 use rustix::fs::{StatVfsMountFlags, statvfs};
 use serde::Deserialize;
 
@@ -36,7 +38,6 @@ struct LuksConfig {
     flags: Vec<String>,
 }
 
-#[test]
 fn boots_to_running() -> Result<()> {
     // sshd accepts root before the boot finishes.
     let state = Command::new("systemctl")
@@ -46,7 +47,6 @@ fn boots_to_running() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn finds_root_by_partition_type() -> Result<()> {
     let cmdline = fs::read_to_string("/proc/cmdline")?;
     assert!(
@@ -58,7 +58,6 @@ fn finds_root_by_partition_type() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn unlocks_encrypted_root() -> Result<()> {
     let devices: Devices = Command::new("lsblk")
         .args(["--json", "--list", "--output", "TYPE,MOUNTPOINTS"])
@@ -75,7 +74,6 @@ fn unlocks_encrypted_root() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn allows_discards_on_encrypted_root() -> Result<()> {
     let devices: Devices = Command::new("lsblk")
         .args(["--json", "--list", "--output", "TYPE,PKNAME,MOUNTPOINTS"])
@@ -102,7 +100,6 @@ fn allows_discards_on_encrypted_root() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn formats_root_with_requested_filesystem() -> Result<()> {
     let expected =
         std::env::var("BOOTC_IMAGECTL_TEST_FILESYSTEM").unwrap_or_else(|_| "ext4".into());
@@ -113,7 +110,6 @@ fn formats_root_with_requested_filesystem() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn mounts_etc_and_var_writable() -> Result<()> {
     for path in ["/etc", "/var"] {
         let flags = statvfs(path)?.f_flag;
@@ -121,3 +117,12 @@ fn mounts_etc_and_var_writable() -> Result<()> {
     }
     Ok(())
 }
+
+pub(crate) const TESTS: &[Test] = &[
+    trial!(boots_to_running),
+    trial!(finds_root_by_partition_type),
+    trial!(unlocks_encrypted_root),
+    trial!(allows_discards_on_encrypted_root),
+    trial!(formats_root_with_requested_filesystem),
+    trial!(mounts_etc_and_var_writable),
+];

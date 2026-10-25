@@ -55,10 +55,11 @@ When an install test fails, the logs of the booted system are in
 
 ### Writing tests
 
-A test for one image goes in the suite's module named after its tag, such
-as `tests/vm/fedora.rs` or `tests/install/fedora_homed.rs`. A check that
-applies to every image should share the same test name in each module and
-call a shared function.
+Each suite has its own test harness, built on
+[libtest-mimic](https://docs.rs/libtest-mimic). Each module lists its tests
+in `TESTS`. A test that only applies to some images declares a
+`Requirement`, such as a distribution or `Homed`, and is ignored for the
+others. See [`src/testing.rs`](src/testing.rs).
 
 ## Adding a distribution
 
@@ -69,8 +70,9 @@ A distribution needs:
   Derivatives that list it in `ID_LIKE` in `/etc/os-release` may also use it.
 - A test image in `tests/images/<name>`, with its sysusers lock file. `.j2`
   files are templates rendered with `homed` set for the homed variant.
-- A module per test suite in `tests/*/<name>.rs`, and `<name>_homed.rs` for
-  the homed variant.
+- Its accounts and the groups of the homed wizard's user in
+  [`src/testing.rs`](src/testing.rs). Checks specific to it go in
+  `tests/container/<name>.rs` and require its distribution.
 
 ## Commits
 

@@ -1,13 +1,13 @@
-//! Check `bootc-imagectl finalize` on Debian.
+//! Check `bootc-imagectl finalize` on Debian and Ubuntu.
 
 use std::path::Path;
 
 use anyhow::Result;
 
-use crate::accounts::{self, MovedAccounts};
 use crate::finalize::{ROOT, names, var_tmpfiles};
+use bootc_imagectl::testing::{Requirement, Test};
+use bootc_imagectl::trial;
 
-#[test]
 fn moves_dpkg_database_and_links_it_back() -> Result<()> {
     assert!(ROOT.exists("usr/lib/sysimage/dpkg/status"));
     assert_eq!(
@@ -21,12 +21,11 @@ fn moves_dpkg_database_and_links_it_back() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn keeps_apt_log_directory_in_var() {
-    assert!(ROOT.is_dir("var/log/apt"));
+fn keeps_apt_log_directory_in_var() -> Result<()> {
+    assert!(ROOT.metadata("var/log/apt")?.is_dir());
+    Ok(())
 }
 
-#[test]
 fn removes_snakeoil_certificate() -> Result<()> {
     assert!(!ROOT.exists("etc/ssl/certs/ssl-cert-snakeoil.pem"));
     assert!(!ROOT.exists("etc/ssl/private/ssl-cert-snakeoil.key"));
@@ -35,56 +34,18 @@ fn removes_snakeoil_certificate() -> Result<()> {
         assert_ne!(
             target.as_deref(),
             Some(Path::new("ssl-cert-snakeoil.pem")),
-            "{name:?}"
+            "{}",
+            name.display()
         );
     }
     Ok(())
 }
 
-/// The image's package users and its regular user.
-const DEBIAN: MovedAccounts = MovedAccounts {
-    system_users: &[("sshd", 990), ("systemd-network", 997)],
-    user: ("debian", 1000),
-    group: "sudo",
-};
-
-#[test]
-fn locks_uids_of_package_users() {
-    accounts::locks_uids(&DEBIAN);
-}
-
-#[test]
-fn moves_accounts_out_of_etc_and_resolves_them_through_nss() -> Result<()> {
-    accounts::moves_accounts_out_of_etc(&DEBIAN)
-}
-
-#[test]
-fn writes_user_records_to_userdb() -> Result<()> {
-    accounts::writes_user_records(&DEBIAN)
-}
-
-#[test]
-fn writes_group_records_to_userdb() -> Result<()> {
-    accounts::writes_group_records(&DEBIAN)
-}
-
-#[test]
-fn writes_privileged_records_for_users_with_passwords() -> Result<()> {
-    accounts::writes_privileged_records(&DEBIAN)
-}
-
-#[test]
-fn writes_membership_files_for_primary_and_auxiliary_groups() -> Result<()> {
-    accounts::writes_membership_files(&DEBIAN)
-}
-
-#[test]
 fn keeps_only_expected_entries_in_var() -> Result<()> {
     assert_eq!(names("var")?, ["cache", "lib", "lock", "log", "run", "tmp"]);
     Ok(())
 }
 
-#[test]
 fn records_var_entries_in_tmpfiles() -> Result<()> {
     let var = var_tmpfiles()?;
     assert!(
@@ -95,7 +56,12 @@ fn records_var_entries_in_tmpfiles() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn initramfs_contains_user_records() -> Result<()> {
-    accounts::initramfs_contains_user_records(&DEBIAN)
-}
+const REQUIRES: &[Requirement] = &[Requirement::Distro(&["debian", "ubuntu"])];
+
+pub(crate) const TESTS: &[Test] = &[
+    trial!(moves_dpkg_database_and_links_it_back, REQUIRES),
+    trial!(keeps_apt_log_directory_in_var, REQUIRES),
+    trial!(removes_snakeoil_certificate, REQUIRES),
+    trial!(keeps_only_expected_entries_in_var, REQUIRES),
+    trial!(records_var_entries_in_tmpfiles, REQUIRES),
+];
