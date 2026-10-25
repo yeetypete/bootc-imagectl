@@ -20,6 +20,9 @@ const REPOSITORY: &str = "localhost/bootc-imagectl-test";
 /// boot wizard creates.
 const HOMED_EXAMPLES: &[&str] = &["ubuntu-desktop", "ubuntu-transient-etc"];
 
+/// The test images built without the homed variant.
+const NO_HOMED_IMAGES: &[&str] = &["ubuntu-24.04"];
+
 /// The examples with a transient /etc.
 const TRANSIENT_ETC_EXAMPLES: &[&str] = &["ubuntu-transient-etc"];
 
@@ -172,7 +175,10 @@ pub(crate) fn images(root: &Path, sources: &[Source]) -> Result<Vec<Image>> {
     let mut images = Vec::new();
     for &source in sources {
         for name in names(&root.join(source.dir()))? {
-            images.extend(source.variants().iter().map(|&variant| Image {
+            let variants = source.variants().iter().filter(|variant| {
+                !(variant.is_homed() && NO_HOMED_IMAGES.contains(&name.as_str()))
+            });
+            images.extend(variants.map(|&variant| Image {
                 name: name.clone(),
                 source,
                 variant,
