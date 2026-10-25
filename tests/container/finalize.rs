@@ -99,20 +99,17 @@ fn skips_declared_paths_in_var_tmpfiles() -> Result<()> {
 
 /// How many tmpfiles.d lines create the directory `path`.
 fn directory_declarations(path: &str) -> Result<usize> {
-    let mut count = 0;
-    for name in names("usr/lib/tmpfiles.d")? {
-        let config = ROOT.read_to_string(Path::new("usr/lib/tmpfiles.d").join(name))?;
-        count += config
-            .lines()
-            .filter(|line| !line.starts_with('#'))
-            .filter_map(|line| {
-                let mut fields = line.split_whitespace();
-                Some((fields.next()?, fields.next()?))
-            })
-            .filter(|&(kind, found)| found == path && kind.starts_with(['d', 'D', 'q', 'Q', 'v']))
-            .count();
-    }
-    Ok(count)
+    let config = Command::new("systemd-tmpfiles")
+        .arg("--cat-config")
+        .run_get_string()?;
+    Ok(config
+        .lines()
+        .filter(|line| {
+            let mut fields = line.split_whitespace();
+            matches!((fields.next(), fields.next()),
+                (Some(kind), Some(found)) if found == path && kind.starts_with(['d', 'D', 'q', 'Q', 'v']))
+        })
+        .count())
 }
 
 fn sets_up_tmp_run_and_lock_in_var() -> Result<()> {
