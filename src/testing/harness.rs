@@ -109,6 +109,8 @@ pub struct TestImage {
     pub reference: String,
     /// The image's distribution, by os-release `ID`.
     pub distro: &'static str,
+    /// The distribution's release, by os-release `VERSION_ID`.
+    pub version: Option<String>,
     features: Vec<Feature>,
 }
 
@@ -137,6 +139,7 @@ impl TestImage {
         Ok(Self {
             reference,
             distro: distro::detect(&root)?.name(),
+            version: distro::version_id(&root)?,
             features,
         })
     }

@@ -81,10 +81,15 @@ fn links_pull_secret() -> Result<()> {
 
 const REQUIRES: &[Requirement] = &[Requirement::Feature(Feature::TransientEtc)];
 
+const WITH_HOMED: &[Requirement] = &[
+    Requirement::Feature(Feature::TransientEtc),
+    Requirement::Feature(Feature::Homed),
+];
+
 pub(crate) const TESTS: &[IntegrationTest] = &[
     integration_test!(mounts_etc_transient, REQUIRES),
-    integration_test!(keeps_wizard_user, REQUIRES),
-    integration_test!(keeps_machine_id, REQUIRES),
+    integration_test!(keeps_wizard_user, WITH_HOMED),
+    integration_test!(keeps_machine_id, WITH_HOMED),
     integration_test!(persists_machine_id_in_var, REQUIRES),
     integration_test!(keeps_ssh_host_keys, REQUIRES),
     integration_test!(links_pull_secret, REQUIRES),

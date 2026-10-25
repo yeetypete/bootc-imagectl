@@ -1,0 +1,164 @@
+ARG UBUNTU_IMAGE=docker.io/library/ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+
+
+FROM ${UBUNTU_IMAGE} AS system-files
+
+COPY system_files/ /system_files/
+RUN chmod -R go-w /system_files
+
+FROM ${UBUNTU_IMAGE} AS bootc-builder
+
+ARG BOOTC_VERSION=v1.17.1
+ARG OSTREE_VERSION=v2026.4
+ENV DEBIAN_FRONTEND=noninteractive
+# Ubuntu 24.04's default Rust is too old for bootc.
+ENV PATH=/usr/lib/rust-1.91/bin:$PATH
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
+    autoconf \
+    automake \
+    bison \
+    build-essential \
+    ca-certificates \
+    cargo-1.91 \
+    git \
+    go-md2man \
+    libext2fs-dev \
+    libglib2.0-dev \
+    liblzma-dev \
+    libssl-dev \
+    libsystemd-dev \
+    libtool \
+    libzstd-dev \
+    pkg-config
+
+# bootc needs ostree 2025.3 or newer, but Ubuntu 24.04 ships 2024.5.
+WORKDIR /ostree
+RUN git clone --depth 1 --branch "${OSTREE_VERSION}" \
+      --recurse-submodules --shallow-submodules \
+      https://github.com/ostreedev/ostree.git . && \
+    env NOCONFIGURE=1 ./autogen.sh && \
+    ./configure --prefix=/usr --libdir=/usr/lib --sysconfdir=/etc \
+      --without-gpgme --with-libsystemd --disable-rofiles-fuse && \
+    make -j"$(nproc)" && \
+    make install && \
+    make install-libLTLIBRARIES install-binPROGRAMS DESTDIR=/out && \
+    ldconfig
+
+WORKDIR /bootc
+
+RUN git clone --depth 1 --branch "${BOOTC_VERSION}" https://github.com/bootc-dev/bootc.git .
+
+# Ubuntu 24.04's 6.8 kernel cannot mount EROFS from a file, so rhel9 makes
+# bootc use a loop device.
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/bootc/target,sharing=locked \
+    CARGO_PROFILE_RELEASE_DEBUG=false CARGO_PROFILE_RELEASE_STRIP=true \
+    make bin install DESTDIR=/out \
+      CARGO_OPTIONS='--no-default-features --features rhel9'
+
+
+FROM ${UBUNTU_IMAGE} AS image
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Keep package installs from generating an initramfs.
+ENV INITRD=No
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y systemd
+
+# Create every user and group with the UID and GID the sysusers lock file fixes
+# before any package can allocate a different one.
+COPY --from=system-files /system_files/usr/lib/sysusers.d/00-bootc-imagectl.lock.conf /usr/lib/sysusers.d/
+RUN systemd-sysusers
+
+{% if not homed %}
+# The base image's user, with a password, for the tests of the user records.
+# WORKAROUND: Ubuntu 24.04's systemd-homed PAM profile makes password changes
+# fail for users homed does not manage, so set it before installing homed.
+RUN echo 'ubuntu:ubuntu' | chpasswd
+{% endif %}
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install --no-install-recommends -y \
+    binutils \
+    btrfs-progs \
+    cryptsetup-bin \
+    dmsetup \
+    dosfstools \
+    dracut \
+    fdisk \
+    libnss-systemd \
+    linux-image-virtual \
+    openssh-server \
+    podman \
+    skopeo \
+    ssl-cert \
+    systemd-boot \
+    systemd-boot-efi \
+    systemd-homed \
+    systemd-sysv \
+    systemd-ukify \
+    zstd
+
+# bootc links against the ostree built alongside it.
+COPY --from=bootc-builder /out/usr/ /usr/
+
+{% if homed %}
+RUN userdel --remove ubuntu
+{% endif %}
+
+COPY --from=system-files /system_files/ /
+
+# Test: the distro's presets disable this unit, so it stays enabled only if
+# finalize records it.
+RUN systemctl enable systemd-boot-check-no-failures.service
+{% if homed %}
+RUN systemctl enable systemd-homed-firstboot.service
+{% endif %}
+{% if transient_etc %}
+# A transient /etc requires setting systemd-firstboot's settings in the image.
+RUN systemd-firstboot --locale=C.UTF-8
+{% endif %}
+
+LABEL containers.bootc=1
+CMD ["/sbin/init"]
+
+
+FROM image AS finalized
+
+# The xtask passes the directory holding bootc-imagectl as a build context.
+COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
+RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts --chunkah-xattrs{% if transient_etc %} --transient-etc{% endif %}
+
+
+# The UKI embeds the kernel and initramfs.
+FROM finalized AS rootfs
+
+RUN bootc container split-kernel-and-rootfs --output /kernel && \
+    rm -r /kernel
+
+RUN bootc container lint --fatal-warnings
+
+
+# The xtask passes rootfs rechunked by chunkah as the chunked build context.
+# Seal the UKI from chunked so that its composefs digest covers the mtimes
+# chunkah rewrites.
+FROM chunked AS uki
+
+RUN --mount=type=bind,from=chunked,target=/target \
+    --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
+    kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
+    mkdir /uki && \
+    bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
+      -- --output "/uki/${kver}.efi"
+
+
+FROM chunked
+
+COPY --from=uki /uki/ /boot/EFI/Linux/

@@ -31,7 +31,7 @@ enum Variant {
     /// The image has no regular user. systemd-homed's first boot wizard
     /// creates it.
     Homed,
-    /// [`Self::Homed`] with a transient /etc.
+    /// [`Self::Default`] with a transient /etc.
     TransientEtc,
 }
 
@@ -40,7 +40,7 @@ impl Variant {
 
     /// Whether systemd-homed's first boot wizard creates the regular user.
     fn is_homed(self) -> bool {
-        matches!(self, Self::Homed | Self::TransientEtc)
+        matches!(self, Self::Homed)
     }
 
     /// Whether /etc is transient.
