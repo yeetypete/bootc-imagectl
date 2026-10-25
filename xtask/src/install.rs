@@ -71,20 +71,14 @@ const INSTALLER_CONTAINER: &str = "bootc-imagectl-install";
 /// Name assigned to the systemd-vmspawn VM.
 const MACHINE: &str = "bootc-imagectl-test";
 
-/// Install `image`, built as `reference`, onto a fresh disk, boot it and run
-/// the test binary in it over ssh.
-pub(crate) fn run(
-    sh: &Shell,
-    image: &Image,
-    reference: &str,
-    binary: &Path,
-    args: &[OsString],
-) -> Result<()> {
+/// Install `image` onto a fresh disk, boot it and run the test binary in it
+/// over ssh.
+pub(crate) fn run(sh: &Shell, image: &Image, binary: &Path, args: &[OsString]) -> Result<()> {
     let work = target_dir(binary)?.join("install");
-    let disk = install_disk(sh, reference, &work, Passphrase::Fixed)?;
+    let disk = install_disk(sh, &image.reference(), &work, Passphrase::Fixed)?;
     // With a transient /etc, the tests run on the second boot, to check that
     // the state of the first boot survived.
-    if image.transient_etc() {
+    if image.has_transient_etc() {
         let mut vm = Vm::boot(binary, &work, &disk)?;
         vm.wait_for_ssh(sh)?;
         vm.wait_for_boot(sh);
@@ -93,7 +87,7 @@ pub(crate) fn run(
     }
     let mut vm = Vm::boot(binary, &work, &disk)?;
     vm.wait_for_ssh(sh)?;
-    vm.run_tests(sh, image, reference, binary, args)?;
+    vm.run_tests(sh, image, binary, args)?;
     vm.power_off(sh)?;
     vm.check_console()
 }
@@ -346,21 +340,14 @@ impl Vm {
         }
     }
 
-    /// Run the test binary in the VM installed from `image`, built as
-    /// `reference`, from the bound target directory.
-    fn run_tests(
-        &self,
-        sh: &Shell,
-        image: &Image,
-        reference: &str,
-        binary: &Path,
-        args: &[OsString],
-    ) -> Result<()> {
+    /// Run the test binary in the VM installed from `image`, from the bound
+    /// target directory.
+    fn run_tests(&self, sh: &Shell, image: &Image, binary: &Path, args: &[OsString]) -> Result<()> {
         let test = bound_binary(binary, TARGET)?;
         let term = format!("TERM={}", env::var("TERM").unwrap_or_default());
         let filesystem = format!("{FILESYSTEM_ENV}={}", filesystem());
         self.ssh(sh, ["env", &term, &filesystem])
-            .args(image.test_env(reference))
+            .args(image.test_env())
             .arg(test)
             .args(args)
             .run()?;

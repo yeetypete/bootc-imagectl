@@ -13,6 +13,9 @@ use minijinja::{Environment, UndefinedBehavior, Value, context};
 /// The extension of template files.
 const TEMPLATE_EXTENSION: &str = "j2";
 
+/// The repository the test images and examples are tagged under.
+const REPOSITORY: &str = "localhost/bootc-imagectl-test";
+
 /// The examples without a regular user, whose user systemd-homed's first
 /// boot wizard creates.
 const HOMED_EXAMPLES: &[&str] = &["ubuntu-desktop", "ubuntu-transient-etc"];
@@ -35,11 +38,21 @@ enum Variant {
 impl Variant {
     const ALL: [Self; 3] = [Self::Default, Self::Homed, Self::TransientEtc];
 
+    /// Whether systemd-homed's first boot wizard creates the regular user.
+    fn is_homed(self) -> bool {
+        matches!(self, Self::Homed | Self::TransientEtc)
+    }
+
+    /// Whether /etc is transient.
+    fn has_transient_etc(self) -> bool {
+        matches!(self, Self::TransientEtc)
+    }
+
     /// The variables the templates see.
     fn context(self) -> Value {
         context! {
-            homed => self != Self::Default,
-            transient_etc => self == Self::TransientEtc,
+            homed => self.is_homed(),
+            transient_etc => self.has_transient_etc(),
         }
     }
 }
@@ -83,17 +96,17 @@ pub(crate) struct Image {
 impl Image {
     /// Whether systemd-homed's first boot wizard creates the image's regular
     /// user.
-    pub(crate) fn homed(&self) -> bool {
+    pub(crate) fn is_homed(&self) -> bool {
         match self.source {
-            Source::Test => self.variant != Variant::Default,
+            Source::Test => self.variant.is_homed(),
             Source::Example => HOMED_EXAMPLES.contains(&self.name.as_str()),
         }
     }
 
     /// Whether the image has a transient /etc.
-    pub(crate) fn transient_etc(&self) -> bool {
+    pub(crate) fn has_transient_etc(&self) -> bool {
         match self.source {
-            Source::Test => self.variant == Variant::TransientEtc,
+            Source::Test => self.variant.has_transient_etc(),
             Source::Example => TRANSIENT_ETC_EXAMPLES.contains(&self.name.as_str()),
         }
     }
@@ -108,6 +121,11 @@ impl Image {
         }
     }
 
+    /// The image's reference once built.
+    pub(crate) fn reference(&self) -> String {
+        format!("{REPOSITORY}:{}", self.tag())
+    }
+
     /// The name `{image}` stands for in build options.
     pub(crate) fn build_name(&self) -> String {
         match self.source {
@@ -117,17 +135,17 @@ impl Image {
     }
 
     /// The environment that tells the test binary it runs against this image,
-    /// built as `reference`, as `NAME=VALUE`.
-    pub(crate) fn test_env(&self, reference: &str) -> [String; 2] {
+    /// as `NAME=VALUE`.
+    pub(crate) fn test_env(&self) -> [String; 2] {
         let features: Vec<&str> = [
-            ("homed", self.homed()),
-            ("transient-etc", self.transient_etc()),
+            ("homed", self.is_homed()),
+            ("transient-etc", self.has_transient_etc()),
         ]
         .into_iter()
         .filter_map(|(feature, has)| has.then_some(feature))
         .collect();
         [
-            format!("BOOTC_IMAGECTL_TEST_IMAGE={reference}"),
+            format!("BOOTC_IMAGECTL_TEST_IMAGE={}", self.reference()),
             format!("BOOTC_IMAGECTL_TEST_FEATURES={}", features.join(",")),
         ]
     }

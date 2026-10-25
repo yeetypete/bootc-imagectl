@@ -14,18 +14,13 @@ use crate::{bound_binary, target_dir};
 /// there.
 const TARGET: &str = "/run/virtiofs-mnt-target";
 
-/// Boot `image`, built as `reference`, in a VM with the target directory
-/// bound in and run the test binary in it over ssh.
-pub(crate) fn run(
-    sh: &Shell,
-    image: &Image,
-    reference: &str,
-    binary: &Path,
-    args: &[OsString],
-) -> Result<()> {
+/// Boot `image` in a VM with the target directory bound in and run the test
+/// binary in it over ssh.
+pub(crate) fn run(sh: &Shell, image: &Image, binary: &Path, args: &[OsString]) -> Result<()> {
     let bind = format!("{}:target", target_dir(binary)?.display());
     let test = bound_binary(binary, TARGET)?;
-    let env = image.test_env(reference);
+    let reference = image.reference();
+    let env = image.test_env();
     cmd!(
         sh,
         "bcvk ephemeral run-ssh --rm --bind {bind} --karg systemd.firstboot=no {reference} env {env...} {test} {args...}"
