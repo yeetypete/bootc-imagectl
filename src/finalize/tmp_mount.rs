@@ -5,7 +5,7 @@
 //! systemd's `tmp.mount`. Debian and Ubuntu before 25.04 only ship it as an
 //! example in /usr/share/systemd.
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use tracing::info;
 
@@ -17,18 +17,23 @@ const UNIT: &str = "tmp.mount";
 /// [`UNIT`] from systemd 255, the oldest systemd bootc-imagectl supports.
 const UNIT_CONTENT: &str = include_str!("../units/tmp.mount");
 
-/// Install and enable [`UNIT`] if the image has none. A masked or disabled
-/// one is left as the image has it.
+/// Install and enable [`UNIT`] if the image has none.
 ///
 /// # Errors
 ///
-/// Fails if the unit files cannot be listed or the unit cannot be written.
+/// Fails if the image's [`UNIT`] is masked or not enabled, or if the unit
+/// files cannot be listed or the unit cannot be written.
 pub(super) fn finalize(root: &Dir) -> Result<()> {
     install(root, &units::unit_files()?)
 }
 
 fn install(root: &Dir, unit_files: &[UnitFile]) -> Result<()> {
     if unit_files.iter().any(|unit| unit.name.as_str() == UNIT) {
+        ensure!(
+            units::is_enabled(root, unit_files, UNIT)?,
+            "{UNIT} is masked or not enabled, but bootc needs a writable /tmp. \
+             help: unmask or enable {UNIT} in the image"
+        );
         return Ok(());
     }
     units::write_enabled_unit(root, UNIT, UNIT_CONTENT, "local-fs.target")?;
@@ -65,11 +70,30 @@ mod tests {
     }
 
     #[test]
-    fn keeps_existing_unit() -> Result<()> {
+    fn keeps_enabled_unit() -> Result<()> {
         let root = rootfs()?;
-        for state in [EnablementState::Static, EnablementState::Masked] {
-            install(&root, &[unit_file(UNIT, state)?])?;
-            assert!(!root.exists(format!("{VENDOR_UNIT_DIR}/{UNIT}")));
+        install(&root, &[unit_file(UNIT, EnablementState::Enabled)?])?;
+        assert!(!root.exists(format!("{VENDOR_UNIT_DIR}/{UNIT}")));
+
+        root.create_dir_all(format!("{VENDOR_UNIT_DIR}/local-fs.target.wants"))?;
+        root.symlink(
+            format!("../{UNIT}"),
+            format!("{VENDOR_UNIT_DIR}/local-fs.target.wants/{UNIT}"),
+        )?;
+        install(&root, &[unit_file(UNIT, EnablementState::Static)?])?;
+        assert!(!root.exists(format!("{VENDOR_UNIT_DIR}/{UNIT}")));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_masked_or_disabled_unit() -> Result<()> {
+        let root = rootfs()?;
+        for state in [
+            EnablementState::Masked,
+            EnablementState::Disabled,
+            EnablementState::Static,
+        ] {
+            assert!(install(&root, &[unit_file(UNIT, state)?]).is_err());
         }
         Ok(())
     }
