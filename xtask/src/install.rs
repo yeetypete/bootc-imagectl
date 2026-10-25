@@ -135,7 +135,6 @@ pub(crate) fn boot_gui(disk: &Path) -> Result<()> {
     let mut signals = Signals::new([SIGINT, SIGTERM])?;
     let mut vmspawn = vmspawn(disk)
         .arg("--console=gui")
-        .arg("--network-user-mode")
         .stdin(Stdio::null())
         // Ctrl-C in the terminal would also reach QEMU, which would quit
         // before systemd-vmspawn shuts the VM down.
@@ -170,7 +169,12 @@ fn vmspawn(disk: &Path) -> Command {
         .arg(format!("--image={}", disk.display()))
         .arg(format!("--machine={MACHINE}"))
         // The VMs do not need TPM.
-        .args(["--ram=4G", "--register=no", "--tpm=no"]);
+        .args([
+            "--ram=4G",
+            "--register=no",
+            "--tpm=no",
+            "--network-user-mode",
+        ]);
     command
 }
 
