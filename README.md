@@ -111,14 +111,6 @@ or disable the prompts in the image with a kernel argument:
 kargs = ["systemd.firstboot=no"]
 ```
 
-To unlock the encrypted root with the TPM in addition to a passphrase (only
-applies to encrypted installs), enroll it once the system is
-installed:
-
-```bash
-sudo systemd-cryptenroll --tpm2-device=auto /dev/my-disk
-```
-
 ### Transient `/etc`
 
 `finalize --transient-etc` makes bootc discard changes to `/etc` on every

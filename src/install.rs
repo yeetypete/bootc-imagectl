@@ -126,12 +126,6 @@ pub fn install(opts: &InstallOpts) -> Result<()> {
     bootc.arg(&target).run_inherited()?;
 
     info!("installed to {device}");
-    if mapping.is_some() {
-        info!(
-            "to unlock the root with the TPM, run systemd-cryptenroll --tpm2-device=auto {}",
-            partitions.root
-        );
-    }
     Ok(())
 }
 
