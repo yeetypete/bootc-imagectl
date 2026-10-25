@@ -81,15 +81,17 @@ pub(crate) fn run(sh: &Shell, image: &Image, binary: &Path, args: &[OsString]) -
     if image.has_transient_etc() {
         let mut vm = Vm::boot(binary, &work, &disk)?;
         vm.wait_for_ssh(sh)?;
+        let systemd = vm.systemd_version(sh)?;
         vm.wait_for_boot(sh);
         vm.power_off(sh)?;
-        vm.check_console()?;
+        vm.check_console(systemd)?;
     }
     let mut vm = Vm::boot(binary, &work, &disk)?;
     vm.wait_for_ssh(sh)?;
+    let systemd = vm.systemd_version(sh)?;
     vm.run_tests(sh, image, binary, args)?;
     vm.power_off(sh)?;
-    vm.check_console()
+    vm.check_console(systemd)
 }
 
 /// How `bootc-imagectl install` gets the passphrase of the disk.
@@ -367,6 +369,18 @@ impl Vm {
             .run();
     }
 
+    /// The major version of systemd running in the VM.
+    fn systemd_version(&self, sh: &Shell) -> Result<u32> {
+        let version = self
+            .ssh(sh, ["systemctl", "show", "--property=Version", "--value"])
+            .read()?;
+        version
+            .split(|c: char| !c.is_ascii_digit())
+            .next()
+            .and_then(|major| major.parse().ok())
+            .with_context(|| format!("parsing the systemd version {version:?}"))
+    }
+
     /// Power off the installed system and wait for systemd-vmspawn to exit.
     fn power_off(&mut self, sh: &Shell) -> Result<()> {
         // ssh may lose the connection before systemctl exits.
@@ -397,11 +411,12 @@ impl Vm {
     }
 
     /// Fail on any unit systemd reported as failed on the console, from the
-    /// initrd to the end of shutdown.
-    fn check_console(&self) -> Result<()> {
+    /// initrd to the end of shutdown. `systemd` is the VM's systemd version.
+    fn check_console(&self, systemd: u32) -> Result<()> {
         let path = self.work.join("console.log");
         let console = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
         let console = String::from_utf8_lossy(&console);
+        let ignore_var_unmount = systemd < VAR_UNMOUNT_FIXED_IN;
         let bad: Vec<&str> = console
             .lines()
             .map(str::trim)
@@ -410,6 +425,7 @@ impl Vm {
                     .iter()
                     .any(|result| line.contains(result.status()))
             })
+            .filter(|line| !(ignore_var_unmount && line.contains(VAR_UNMOUNT_FAILURE)))
             .collect();
         if !bad.is_empty() {
             bail!(
@@ -435,6 +451,16 @@ impl Vm {
         .args(command)
     }
 }
+
+/// The harmless failure systemd<258 reports because it ignores var.mount's
+/// drop-in, fixed by systemd/systemd@fee2f5ca3. systemd-shutdown unmounts /var
+/// later.
+///
+/// TODO: drop once bootc generates var.mount, see `src/finalize/var.rs`.
+const VAR_UNMOUNT_FAILURE: &str = "Failed unmounting var.mount.";
+
+/// The systemd version that applies var.mount's drop-ins.
+const VAR_UNMOUNT_FIXED_IN: u32 = 258;
 
 /// The job results systemd reports as failures.
 #[derive(Debug, Clone, Copy)]
