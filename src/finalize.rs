@@ -25,6 +25,7 @@ mod layout;
 mod presets;
 mod setup_root;
 mod systemd;
+mod tmp_mount;
 mod tmpfiles;
 mod transient_etc;
 mod units;
@@ -59,6 +60,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     initramfs::finalize(&root, distro).context("building the initramfs")?;
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;
+    tmp_mount::finalize(&root).context("mounting a tmpfs on /tmp")?;
     kargs::finalize(&root).context("writing the kernel arguments")?;
     if opts.chunkah_xattrs {
         components::finalize(&root, distro).context("setting the package components")?;
