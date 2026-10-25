@@ -2,10 +2,9 @@
 
 use anyhow::Result;
 
-use crate::accounts::{self, MovedAccounts};
 use crate::finalize::{ROOT, names, var_tmpfiles};
+use bootc_imagectl::testing::{IntegrationTest, Requirement, integration_test};
 
-#[test]
 fn moves_pacman_database_and_removes_its_indexes() -> Result<()> {
     let pacman_conf = ROOT.read_to_string("etc/pacman.conf")?;
     assert!(
@@ -19,50 +18,11 @@ fn moves_pacman_database_and_removes_its_indexes() -> Result<()> {
     Ok(())
 }
 
-/// The image's package users and its regular user.
-const ARCH: MovedAccounts = MovedAccounts {
-    system_users: &[("avahi", 969), ("uuidd", 970)],
-    user: ("archie", 1000),
-    group: "wheel",
-};
-
-#[test]
-fn locks_uids_of_package_users() {
-    accounts::locks_uids(&ARCH);
-}
-
-#[test]
-fn moves_accounts_out_of_etc_and_resolves_them_through_nss() -> Result<()> {
-    accounts::moves_accounts_out_of_etc(&ARCH)
-}
-
-#[test]
-fn writes_user_records_to_userdb() -> Result<()> {
-    accounts::writes_user_records(&ARCH)
-}
-
-#[test]
-fn writes_group_records_to_userdb() -> Result<()> {
-    accounts::writes_group_records(&ARCH)
-}
-
-#[test]
-fn writes_privileged_records_for_users_with_passwords() -> Result<()> {
-    accounts::writes_privileged_records(&ARCH)
-}
-
-#[test]
-fn writes_membership_files_for_primary_and_auxiliary_groups() -> Result<()> {
-    accounts::writes_membership_files(&ARCH)
-}
-
-#[test]
 fn keeps_only_expected_entries_in_var() -> Result<()> {
     assert_eq!(names("var")?, ["lock", "run", "tmp"]);
     Ok(())
 }
 
-#[test]
 fn records_var_entries_in_tmpfiles() -> Result<()> {
     let var = var_tmpfiles()?;
     assert!(var.contains("L /var/mail - - - - spool/mail\n"), "{var}");
@@ -73,7 +33,10 @@ fn records_var_entries_in_tmpfiles() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn initramfs_contains_user_records() -> Result<()> {
-    accounts::initramfs_contains_user_records(&ARCH)
-}
+const REQUIRES: &[Requirement] = &[Requirement::Distro(&["arch"])];
+
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(moves_pacman_database_and_removes_its_indexes, REQUIRES),
+    integration_test!(keeps_only_expected_entries_in_var, REQUIRES),
+    integration_test!(records_var_entries_in_tmpfiles, REQUIRES),
+];

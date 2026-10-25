@@ -16,9 +16,6 @@ mod images;
 mod install;
 mod vm;
 
-/// The repository the test images and examples are tagged under.
-const REPOSITORY: &str = "localhost/bootc-imagectl-test";
-
 /// chunkah OCI image.
 const CHUNKAH: &str = "quay.io/coreos/chunkah:v0.7.1@sha256:71e593421c5de7dcc7c8c5c50e98d3bac572055a76f399f61a491d123c20a523";
 
@@ -175,14 +172,13 @@ impl Suite {
         self,
         sh: &Shell,
         image: &images::Image,
-        reference: &str,
         binary: &Path,
         args: &[OsString],
     ) -> Result<()> {
         match self {
-            Self::Container => container::run(sh, reference, binary, args),
-            Self::Vm => vm::run(sh, reference, binary, args),
-            Self::Install => install::run(sh, reference, image.transient_etc(), binary, args),
+            Self::Container => container::run(sh, image, binary, args),
+            Self::Vm => vm::run(sh, image, binary, args),
+            Self::Install => install::run(sh, image, binary, args),
         }
     }
 }
@@ -313,8 +309,7 @@ fn find_image<'a>(variants: &'a [images::Image], tag: &str) -> Result<&'a images
 }
 
 /// Build each of the suite's selected images and run the test binary
-/// against it. The tests of the other images live in modules named after
-/// them and are skipped.
+/// against it. The binary ignores the tests that do not apply to the image.
 fn run(
     sh: &Shell,
     build: &Build,
@@ -329,19 +324,15 @@ fn run(
         .iter()
         .filter(|image| selection.images.is_empty() || selection.images.contains(&image.tag()));
     for image in selected {
-        let reference = build_image(sh, build, image, target)?;
+        build_image(sh, build, image, target)?;
         let mut args = args.to_vec();
-        for other in variants.iter().filter(|other| *other != image) {
-            args.push("--skip".into());
-            args.push(format!("{}::", other.module()).into());
-        }
         let color = if std::io::stdout().is_terminal() {
             "always"
         } else {
             "never"
         };
         args.push(format!("--color={color}").into());
-        suite.run(sh, image, &reference, binary, &args)?;
+        suite.run(sh, image, binary, &args)?;
     }
     Ok(())
 }
@@ -352,8 +343,8 @@ fn boot(sh: &Shell, build: &Build, tag: &str) -> Result<()> {
     let variants = Suite::Vm.images()?;
     let image = find_image(&variants, tag)?;
     let target = build_bootc_imagectl(sh)?;
-    let reference = build_image(sh, build, image, &target)?;
-    vm::boot(&reference)
+    build_image(sh, build, image, &target)?;
+    vm::boot(&image.reference())
 }
 
 /// Build bootc-imagectl and the example `name`, install it onto a disk and
@@ -371,17 +362,16 @@ fn example(sh: &Shell, build: &Build, name: &str) -> Result<()> {
             )
         })?;
     let target = build_bootc_imagectl(sh)?;
-    let reference = build_image(sh, build, image, &target)?;
+    build_image(sh, build, image, &target)?;
     let work = target.join("example");
-    let disk = install::install_disk(sh, &reference, &work, install::Passphrase::Prompt)?;
+    let disk = install::install_disk(sh, &image.reference(), &work, install::Passphrase::Prompt)?;
     install::boot_gui(&disk)
 }
 
-/// Render `image` into `target`, build it and return its reference.
-fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) -> Result<String> {
-    let tag = image.tag();
-    let dir = target.join("images").join(&tag);
-    let reference = format!("{REPOSITORY}:{tag}");
+/// Render `image` into `target` and build it as [`images::Image::reference`].
+fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) -> Result<()> {
+    let dir = target.join("images").join(image.tag());
+    let reference = image.reference();
     image.render(workspace_dir()?, &dir)?;
     let name = image.build_name();
     let rootfs = format!("{reference}-rootfs");
@@ -397,7 +387,7 @@ fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) 
     build
         .without_cache_to()
         .build(sh, &name, &dir, target, &args)?;
-    Ok(reference)
+    Ok(())
 }
 
 /// Rechunk the image `rootfs` with chunkah.

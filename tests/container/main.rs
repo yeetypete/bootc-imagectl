@@ -1,13 +1,23 @@
 //! Run tests inside a container of the image.
 
+use bootc_imagectl::testing;
+
 mod accounts;
 mod arch;
-mod arch_homed;
 mod debian;
-mod debian_homed;
 mod fedora;
-mod fedora_homed;
 mod finalize;
 mod homed;
-mod ubuntu;
-mod ubuntu_homed;
+mod regular_user;
+
+fn main() {
+    testing::run(&[
+        accounts::TESTS,
+        arch::TESTS,
+        debian::TESTS,
+        fedora::TESTS,
+        finalize::TESTS,
+        homed::TESTS,
+        regular_user::TESTS,
+    ]);
+}

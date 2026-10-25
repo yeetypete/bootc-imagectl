@@ -6,13 +6,15 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use bootc_imagectl::command::CommandRunExt;
+use bootc_imagectl::testing::{self, Feature, IntegrationTest, Requirement, integration_test};
 use serde::{Deserialize, Deserializer};
 
 /// The user the xtask passes a credential for.
 const USER: &str = "alice";
 
-/// systemd-homed manages the user, which is a member of `groups`.
-pub(crate) fn adds_wizard_user_to(groups: &[&str]) -> Result<()> {
+/// systemd-homed manages the user, which is a member of the groups
+/// finalize configured.
+fn adds_wizard_user_to_groups() -> Result<()> {
     Command::new("homectl")
         .args(["inspect", USER])
         .run_get_string()?;
@@ -22,7 +24,7 @@ pub(crate) fn adds_wizard_user_to(groups: &[&str]) -> Result<()> {
         .iter()
         .map(|group| group.name().to_string_lossy().into_owned())
         .collect();
-    for group in groups {
+    for group in testing::wizard_groups()? {
         assert!(
             found.iter().any(|found| found == group),
             "{group}: {found:?}"
@@ -74,7 +76,7 @@ enum UserStorage {
 }
 
 /// systemd-homed stored the user's home without encrypting it again.
-pub(crate) fn stores_wizard_user_unencrypted() -> Result<()> {
+fn stores_wizard_user_unencrypted() -> Result<()> {
     let storages: Vec<UserStorage> = user_record()?
         .binding
         .into_values()
@@ -85,3 +87,10 @@ pub(crate) fn stores_wizard_user_unencrypted() -> Result<()> {
     assert_eq!(storages, [UserStorage::Subvolume]);
     Ok(())
 }
+
+const REQUIRES: &[Requirement] = &[Requirement::Feature(Feature::Homed)];
+
+pub(crate) const TESTS: &[IntegrationTest] = &[
+    integration_test!(adds_wizard_user_to_groups, REQUIRES),
+    integration_test!(stores_wizard_user_unencrypted, REQUIRES),
+];
