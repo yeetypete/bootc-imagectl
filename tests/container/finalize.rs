@@ -39,7 +39,7 @@ fn uki() -> Result<String> {
 
 /// The paths in the initramfs the UKI embeds.
 pub(crate) fn initramfs_paths() -> Result<Vec<String>> {
-    let listing = Command::new("lsinitrd").arg(uki()?).output_string()?;
+    let listing = Command::new("lsinitrd").arg(uki()?).run_get_string()?;
     Ok(listing
         .lines()
         .flat_map(str::split_whitespace)
@@ -142,7 +142,7 @@ fn ends_presets_with_catchall() -> Result<()> {
     // Without a catchall, the first boot would enable every unit.
     let presets = Command::new("systemd-analyze")
         .args(["--root=/", "--tldr", "cat-config", "systemd/system-preset"])
-        .output_string()?;
+        .run_get_string()?;
     assert!(presets.lines().any(|line| line == "disable *"), "{presets}");
     Ok(())
 }

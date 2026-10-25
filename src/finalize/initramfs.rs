@@ -96,11 +96,11 @@ pub(super) fn finalize(root: &Dir, distro: &dyn Distro) -> Result<()> {
     let initramfs = format!("{moddir}/initramfs.img");
 
     write_dracut_conf(root)?;
-    Command::new("depmod").arg(&kver).run()?;
+    Command::new("depmod").arg(&kver).run_inherited()?;
     Command::new("dracut")
         .args(["--force", "--verbose", "--kver", &kver])
         .arg(format!("/{initramfs}"))
-        .run()?;
+        .run_inherited()?;
     root.set_permissions(&initramfs, Permissions::from_mode(0o600))
         .with_context(|| format!("setting the mode of /{initramfs}"))?;
     Ok(())

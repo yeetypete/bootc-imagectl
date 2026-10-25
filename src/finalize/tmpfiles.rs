@@ -123,7 +123,7 @@ fn expand_specifier(path: &str) -> String {
 pub(super) fn cat_config() -> Result<String> {
     Command::new("systemd-tmpfiles")
         .args(["--root=/", "--cat-config"])
-        .output_string()
+        .run_get_string()
 }
 
 /// Every path the tmpfiles.d `config` creates.

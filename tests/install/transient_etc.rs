@@ -16,7 +16,7 @@ use crate::homed::user_record;
 pub(crate) fn mounts_etc_transient() -> Result<()> {
     let mount = Command::new("findmnt")
         .args(["--noheadings", "--output=FSTYPE,SOURCE", "/etc"])
-        .output_string()?;
+        .run_get_string()?;
     assert_eq!(
         mount.split_whitespace().collect::<Vec<_>>(),
         ["overlay", "transient"]
@@ -52,7 +52,7 @@ pub(crate) fn persists_machine_id_in_var() -> Result<()> {
 
 /// Every host key sshd loads links to one in /var from the first boot.
 pub(crate) fn keeps_ssh_host_keys() -> Result<()> {
-    let config = Command::new("sshd").arg("-T").output_string()?;
+    let config = Command::new("sshd").arg("-T").run_get_string()?;
     let keys: Vec<&Utf8Path> = config
         .lines()
         .filter_map(|line| line.split_once(' '))

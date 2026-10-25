@@ -53,10 +53,9 @@ pub(super) struct UnitFile {
 ///
 /// Fails if systemctl fails or its output cannot be parsed.
 pub(super) fn unit_files() -> Result<Vec<UnitFile>> {
-    let output = Command::new("systemctl")
+    Command::new("systemctl")
         .args(["list-unit-files", "--root=/", "--output=json"])
-        .output_string()?;
-    serde_json::from_str(&output).context("parsing systemctl list-unit-files")
+        .run_and_parse_json()
 }
 
 /// The configuration `name` of the rootfs at `/`, e.g. `systemd/system-preset`,
@@ -69,7 +68,7 @@ pub(super) fn unit_files() -> Result<Vec<UnitFile>> {
 pub(super) fn cat_config(name: &str) -> Result<String> {
     Command::new("systemd-analyze")
         .args(["--root=/", "--tldr", "cat-config", name])
-        .output_string()
+        .run_get_string()
 }
 
 /// Whether the unit `name` is enabled, including by a symlink in a vendor
@@ -338,7 +337,7 @@ pub(super) fn enabled_instances(
     for template in templates {
         let output: IsEnabled = Command::new("systemctl")
             .args(["is-enabled", "--root=/", "--full", template.as_str()])
-            .output_string()?
+            .run_get_string()?
             .parse()
             .with_context(|| format!("parsing systemctl is-enabled {template}"))?;
         // The symlinks include aliases, e.g. autovt@.service of

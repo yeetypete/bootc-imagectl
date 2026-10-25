@@ -35,10 +35,9 @@ struct ImageReference {
 
 /// The booted deployment updates from `imgref` in a registry.
 pub(crate) fn updates_from(imgref: &str) -> Result<()> {
-    let output = Command::new("bootc")
+    let host: Host = Command::new("bootc")
         .args(["status", "--json"])
-        .output_string()?;
-    let host: Host = serde_json::from_str(&output)?;
+        .run_and_parse_json()?;
     let reference = host.status.booted.image.image;
     assert_eq!(reference.image, imgref);
     assert_eq!(reference.transport, "registry");

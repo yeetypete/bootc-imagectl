@@ -374,7 +374,7 @@ pub(crate) fn is_config_file_name(name: &str) -> bool {
 pub(crate) fn read_all(root: &Dir) -> Result<Vec<ConfigFile>> {
     let config = Command::new("systemd-sysusers")
         .args(["--root=/", "--tldr"])
-        .output_string()?;
+        .run_get_string()?;
     read(root, config_paths(&config))
 }
 
