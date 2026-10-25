@@ -4,7 +4,7 @@
 use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context as _, Result, bail};
@@ -227,8 +227,9 @@ macro_rules! trial {
     };
 }
 
-/// The image under test, set by [`run`].
-static IMAGE: OnceLock<TestImage> = OnceLock::new();
+/// The image under test, read from the environment the xtask sets.
+static IMAGE: LazyLock<TestImage> =
+    LazyLock::new(|| TestImage::from_env().expect("the image under test"));
 
 /// The image under test.
 #[derive(Debug)]
@@ -244,10 +245,10 @@ pub struct TestImage {
 ///
 /// # Panics
 ///
-/// Panics outside a suite started by [`run`].
+/// Panics if the xtask did not describe the image under test.
 #[must_use]
 pub fn image() -> &'static TestImage {
-    IMAGE.get().expect("the suite runs through testing::run")
+    &IMAGE
 }
 
 impl TestImage {
@@ -295,7 +296,7 @@ impl TestImage {
 /// Panics if the xtask did not describe the image under test.
 pub fn run(tests: &[&[Test]]) -> ! {
     let args = Arguments::from_args();
-    let image = IMAGE.get_or_init(|| TestImage::from_env().expect("the image under test"));
+    let image = image();
     let trials = tests
         .iter()
         .flat_map(|tests| tests.iter())
