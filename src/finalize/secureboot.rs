@@ -18,10 +18,10 @@ use uuid::{Uuid, uuid};
 use crate::cli::SecureBootOpts;
 use crate::command::CommandRunExt;
 
-/// Where systemd-boot's EFI binaries are.
-const SYSTEMD_BOOT_DIR: &str = "usr/lib/systemd/boot/efi";
+/// Where systemd-boot's EFI binaries are, relative to the rootfs.
+pub(crate) const SYSTEMD_BOOT_DIR: &str = "usr/lib/systemd/boot/efi";
 
-/// The sbsigntools commands signing needs, in /usr/bin.
+/// The sbsigntools commands signing needs.
 const TOOLS: [&str; 2] = ["sbsign", "sbvarsign"];
 
 /// Where bootc copies the keys to the ESP from.
@@ -47,12 +47,15 @@ const VARIABLES: [&str; 3] = ["PK", "KEK", "db"];
 ///
 /// Fails if the image lacks systemd-boot or a signing tool, or signing fails.
 pub(super) fn finalize(root: &Dir, opts: &SecureBootOpts) -> Result<()> {
-    for tool in TOOLS {
-        ensure!(
-            root.is_file(format!("usr/bin/{tool}")),
-            "the image lacks /usr/bin/{tool}. help: install sbsigntool on Debian and Ubuntu, or sbsigntools on Fedora and Arch"
-        );
-    }
+    let missing: Vec<_> = TOOLS
+        .into_iter()
+        .filter(|tool| which::which(tool).is_err())
+        .collect();
+    ensure!(
+        missing.is_empty(),
+        "the image lacks tools Secure Boot signing needs: {}. help: install sbsigntool on Debian and Ubuntu, or sbsigntools on Fedora and Arch",
+        missing.join(", ")
+    );
     sign_systemd_boot(root, &opts.private_key, &opts.certificate)?;
     write_keys(root, &opts.private_key, &opts.certificate)
 }

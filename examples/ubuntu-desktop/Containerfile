@@ -141,7 +141,7 @@ RUN bootc container lint --fatal-warnings
 # context:
 #
 #     podman build --build-context bootc-imagectl=target/release \
-#       --build-context secureboot=keys \
+#       --build-context secureboot=keys/public \
 #       --secret id=secureboot_key,src=keys/secureboot.key \
 #       --target rootfs --tag localhost/rootfs .
 #     podman run --rm --mount type=image,src=localhost/rootfs,dst=/chunkah \
@@ -149,7 +149,7 @@ RUN bootc container lint --fatal-warnings
 #       quay.io/coreos/chunkah build --max-layers 128 --source-date-epoch 0 \
 #       --tag localhost/chunked | podman load
 #     podman build --build-context bootc-imagectl=target/release \
-#       --build-context secureboot=keys \
+#       --build-context secureboot=keys/public \
 #       --secret id=secureboot_key,src=keys/secureboot.key \
 #       --build-context chunked=container-image://localhost/chunked .
 #

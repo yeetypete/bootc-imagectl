@@ -22,11 +22,9 @@ use tracing::{info, warn};
 
 use crate::cli::{Encrypt, Filesystem, InstallOpts};
 use crate::command::CommandRunExt;
+use crate::finalize::SYSTEMD_BOOT_DIR;
 
 mod repart;
-
-/// Where systemd-boot's EFI binaries are, which bootc installs to the ESP.
-const SYSTEMD_BOOT_DIR: &str = "/usr/lib/systemd/boot/efi";
 
 /// Where the image holds its UKI, which bootc installs to the ESP.
 const UKI_DIR: &str = "/boot/EFI/Linux";
@@ -155,8 +153,8 @@ fn check_image(filesystem: Filesystem, encrypt: Encrypt) -> Result<()> {
         missing.join(", ")
     );
     ensure!(
-        fs::exists(SYSTEMD_BOOT_DIR)?,
-        "the image lacks systemd-boot's EFI binaries in {SYSTEMD_BOOT_DIR}"
+        fs::exists(format!("/{SYSTEMD_BOOT_DIR}"))?,
+        "the image lacks systemd-boot's EFI binaries in /{SYSTEMD_BOOT_DIR}"
     );
     ensure!(
         has_uki(Utf8Path::new(UKI_DIR))?,

@@ -113,27 +113,6 @@ struct Selection {
     images: Vec<String>,
 }
 
-/// The Secure Boot key and certificate the test images are signed with,
-/// generated in `target` on first use.
-fn secureboot_key(sh: &Shell, target: &Path) -> Result<(PathBuf, PathBuf)> {
-    let dir = target.join("secureboot");
-    let key = dir.join("secureboot.key");
-    let cert = dir.join("secureboot.crt");
-    if !cert.exists() {
-        sh.create_dir(&dir)?;
-        let tmp_key = dir.join("secureboot.key.tmp");
-        let tmp_cert = dir.join("secureboot.crt.tmp");
-        cmd!(
-            sh,
-            "openssl req -quiet -newkey rsa:2048 -nodes -keyout {tmp_key} -x509 -sha256 -days 3650 -subj /CN=bootc-imagectl-test/ -out {tmp_cert}"
-        )
-        .run()?;
-        std::fs::rename(tmp_key, &key)?;
-        std::fs::rename(tmp_cert, &cert)?;
-    }
-    Ok((key, cert))
-}
-
 impl Build {
     /// This build without its cache destinations.
     fn without_cache_to(&self) -> Self {
@@ -165,7 +144,7 @@ impl Build {
         if image.has_secure_boot() {
             let (key, cert) = secureboot_key(sh, target)?;
             options.push(format!("--secret=id=secureboot_key,src={}", key.display()));
-            let dir = cert.parent().context("finding the key directory")?;
+            let dir = cert.parent().context("finding the certificate directory")?;
             options.push(format!("--build-context=secureboot={}", dir.display()));
         }
         cmd!(
@@ -175,6 +154,27 @@ impl Build {
         .run()?;
         Ok(())
     }
+}
+
+/// The Secure Boot key and certificate the test images are signed with,
+/// generated in `target` on first use.
+fn secureboot_key(sh: &Shell, target: &Path) -> Result<(PathBuf, PathBuf)> {
+    let dir = target.join("secureboot");
+    let key = dir.join("secureboot.key");
+    let cert = dir.join("public").join("secureboot.crt");
+    if !cert.exists() {
+        sh.create_dir(dir.join("public"))?;
+        let tmp_key = dir.join("secureboot.key.tmp");
+        let tmp_cert = dir.join("secureboot.crt.tmp");
+        cmd!(
+            sh,
+            "openssl req -quiet -newkey rsa:2048 -nodes -keyout {tmp_key} -x509 -sha256 -days 3650 -subj /CN=bootc-imagectl-test/ -out {tmp_cert}"
+        )
+        .run()?;
+        std::fs::rename(tmp_key, &key)?;
+        std::fs::rename(tmp_cert, &cert)?;
+    }
+    Ok((key, cert))
 }
 
 impl Suite {
