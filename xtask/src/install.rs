@@ -202,7 +202,8 @@ fn firmware(sh: &Shell, image: &Image) -> Result<String> {
     })
 }
 
-/// A QEMU firmware descriptor, see firmware.json in QEMU's interop docs.
+/// A QEMU firmware descriptor, see `Firmware` in
+/// <https://gitlab.com/qemu-project/qemu/-/blob/master/docs/interop/firmware.json>.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 struct FirmwareDescriptor {
