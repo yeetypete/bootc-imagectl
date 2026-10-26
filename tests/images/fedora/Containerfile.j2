@@ -32,6 +32,7 @@ RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     NetworkManager \
     openssh-clients \
     openssh-server \
+    sbsigntools \
     systemd-boot-unsigned \
     systemd-ukify \
     zstd
@@ -63,7 +64,25 @@ FROM image AS finalized
 
 # The xtask passes the directory holding bootc-imagectl as a build context.
 COPY --from=bootc-imagectl bootc-imagectl /usr/libexec/bootc-imagectl
-RUN /usr/libexec/bootc-imagectl finalize --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf --read-only-accounts{% if transient_etc %} --transient-etc{% endif %}
+{% if secureboot %}
+# The Secure Boot key is passed as a secret, and its certificate as the
+# secureboot build context.
+{% endif %}
+RUN \
+{% if secureboot %}
+    --mount=type=secret,id=secureboot_key \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
+{% endif %}
+    /usr/libexec/bootc-imagectl finalize \
+      --read-only-accounts \
+{% if transient_etc %}
+      --transient-etc \
+{% endif %}
+{% if secureboot %}
+      --secureboot-private-key /run/secrets/secureboot_key \
+      --secureboot-certificate /run/secureboot.crt \
+{% endif %}
+      --sysusers-lock /usr/lib/sysusers.d/00-bootc-imagectl.lock.conf
 
 
 # The UKI embeds the kernel and initramfs.
@@ -80,12 +99,25 @@ RUN bootc container lint --fatal-warnings
 # chunkah rewrites.
 FROM chunked AS uki
 
+{% if secureboot %}
+# The UKI is signed with the same key as systemd-boot.
+{% endif %}
 RUN --mount=type=bind,from=chunked,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
+{% if secureboot %}
+    --mount=type=secret,id=secureboot_key \
+    --mount=type=bind,from=secureboot,source=secureboot.crt,target=/run/secureboot.crt \
+{% endif %}
     kver="$(basename "$(dirname /kernel/*/vmlinuz)")" && \
     mkdir /uki && \
     bootc container ukify --rootfs /target --kernel-dir "/kernel/${kver}" \
-      -- --output "/uki/${kver}.efi"
+      -- \
+{% if secureboot %}
+      --signtool sbsign \
+      --secureboot-private-key /run/secrets/secureboot_key \
+      --secureboot-certificate /run/secureboot.crt \
+{% endif %}
+      --output "/uki/${kver}.efi"
 
 
 FROM chunked

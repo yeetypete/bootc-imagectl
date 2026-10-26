@@ -26,6 +26,9 @@ const NO_HOMED_IMAGES: &[&str] = &["ubuntu-24.04"];
 /// The examples with a transient /etc.
 const TRANSIENT_ETC_EXAMPLES: &[&str] = &["ubuntu-transient-etc"];
 
+/// The examples signed for Secure Boot.
+const SECURE_BOOT_EXAMPLES: &[&str] = &["ubuntu-desktop"];
+
 /// A variant of every test image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Variant {
@@ -36,10 +39,17 @@ enum Variant {
     Homed,
     /// [`Self::Default`] with a transient /etc.
     TransientEtc,
+    /// The image is signed for Secure Boot.
+    SecureBoot,
 }
 
 impl Variant {
-    const ALL: [Self; 3] = [Self::Default, Self::Homed, Self::TransientEtc];
+    const ALL: [Self; 4] = [
+        Self::Default,
+        Self::Homed,
+        Self::TransientEtc,
+        Self::SecureBoot,
+    ];
 
     /// Whether systemd-homed's first boot wizard creates the regular user.
     fn is_homed(self) -> bool {
@@ -51,11 +61,17 @@ impl Variant {
         matches!(self, Self::TransientEtc)
     }
 
+    /// Whether the image is signed for Secure Boot.
+    fn has_secure_boot(self) -> bool {
+        matches!(self, Self::SecureBoot)
+    }
+
     /// The variables the templates see.
     fn context(self) -> Value {
         context! {
             homed => self.is_homed(),
             transient_etc => self.has_transient_etc(),
+            secureboot => self.has_secure_boot(),
         }
     }
 }
@@ -65,7 +81,7 @@ impl Variant {
 pub(crate) enum Source {
     /// A test image in tests/images, built once per variant.
     Test,
-    /// An example in examples/, built as is.
+    /// An example in examples/.
     Example,
 }
 
@@ -121,6 +137,7 @@ impl Image {
             (Source::Test, Variant::Default) => self.name.clone(),
             (Source::Test, Variant::Homed) => format!("{}-homed", self.name),
             (Source::Test, Variant::TransientEtc) => format!("{}-transient-etc", self.name),
+            (Source::Test, Variant::SecureBoot) => format!("{}-secureboot", self.name),
         }
     }
 
@@ -137,12 +154,21 @@ impl Image {
         }
     }
 
+    /// Whether the image is signed for Secure Boot.
+    pub(crate) fn has_secure_boot(&self) -> bool {
+        match self.source {
+            Source::Test => self.variant.has_secure_boot(),
+            Source::Example => SECURE_BOOT_EXAMPLES.contains(&self.name.as_str()),
+        }
+    }
+
     /// The environment that tells the test binary it runs against this image,
     /// as `NAME=VALUE`.
     pub(crate) fn test_env(&self) -> [String; 2] {
         let features: Vec<&str> = [
             ("homed", self.is_homed()),
             ("transient-etc", self.has_transient_etc()),
+            ("secureboot", self.has_secure_boot()),
         ]
         .into_iter()
         .filter_map(|(feature, has)| has.then_some(feature))

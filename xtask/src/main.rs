@@ -53,7 +53,8 @@ enum Task {
     Vm {
         #[command(flatten)]
         build: Build,
-        /// The image's tag, e.g. `ubuntu` or `ubuntu-homed`.
+        /// The image's tag, e.g. `ubuntu`, `ubuntu-homed` or
+        /// `ubuntu-secureboot`.
         image: String,
     },
     /// Build an example, install it onto a disk and boot it in a VM with a
@@ -124,22 +125,28 @@ impl Build {
         Self { options }
     }
 
-    /// Build the image `name` rendered into `dir` with the bootc-imagectl
-    /// binary from `target`, passing `args` to the builder.
+    /// Build `image` rendered into `dir` with the bootc-imagectl binary from
+    /// `target`, passing `args` to the builder.
     fn build(
         &self,
         sh: &Shell,
-        name: &str,
+        image: &images::Image,
         dir: &Path,
         target: &Path,
         args: &[String],
     ) -> Result<()> {
-        let options: Vec<String> = self
+        let mut options: Vec<String> = self
             .options
             .iter()
             .filter(|option| !option.is_empty())
-            .map(|option| option.replace("{image}", name))
+            .map(|option| option.replace("{image}", &image.build_name()))
             .collect();
+        if image.has_secure_boot() {
+            let (key, cert) = secureboot_key(sh, target)?;
+            options.push(format!("--secret=id=secureboot_key,src={}", key.display()));
+            let dir = cert.parent().context("finding the certificate directory")?;
+            options.push(format!("--build-context=secureboot={}", dir.display()));
+        }
         cmd!(
             sh,
             "podman build {options...} --build-context bootc-imagectl={target} {args...} {dir}"
@@ -147,6 +154,27 @@ impl Build {
         .run()?;
         Ok(())
     }
+}
+
+/// The Secure Boot key and certificate the test images are signed with,
+/// generated in `target` on first use.
+fn secureboot_key(sh: &Shell, target: &Path) -> Result<(PathBuf, PathBuf)> {
+    let dir = target.join("secureboot");
+    let key = dir.join("secureboot.key");
+    let cert = dir.join("public").join("secureboot.crt");
+    if !cert.exists() {
+        sh.create_dir(dir.join("public"))?;
+        let tmp_key = dir.join("secureboot.key.tmp");
+        let tmp_cert = dir.join("secureboot.crt.tmp");
+        cmd!(
+            sh,
+            "openssl req -quiet -newkey rsa:2048 -nodes -keyout {tmp_key} -x509 -sha256 -days 3650 -subj /CN=bootc-imagectl-test/ -out {tmp_cert}"
+        )
+        .run()?;
+        std::fs::rename(tmp_key, &key)?;
+        std::fs::rename(tmp_cert, &cert)?;
+    }
+    Ok((key, cert))
 }
 
 impl Suite {
@@ -167,7 +195,7 @@ impl Suite {
         images::images(workspace_dir()?, sources)
     }
 
-    /// Run the test binary against `image`.
+    /// Run the test binary against `image`, built as `reference`.
     fn run(
         self,
         sh: &Shell,
@@ -365,7 +393,7 @@ fn example(sh: &Shell, build: &Build, name: &str) -> Result<()> {
     build_image(sh, build, image, &target)?;
     let work = target.join("example");
     let disk = install::install_disk(sh, &image.reference(), &work, install::Passphrase::Prompt)?;
-    install::boot_gui(&disk)
+    install::boot_gui(sh, image, &disk)
 }
 
 /// Render `image` into `target` and build it as [`images::Image::reference`].
@@ -373,10 +401,9 @@ fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) 
     let dir = target.join("images").join(image.tag());
     let reference = image.reference();
     image.render(workspace_dir()?, &dir)?;
-    let name = image.build_name();
     let rootfs = format!("{reference}-rootfs");
     let rootfs_args = ["--target=rootfs".into(), format!("--tag={rootfs}")];
-    build.build(sh, &name, &dir, target, &rootfs_args)?;
+    build.build(sh, image, &dir, target, &rootfs_args)?;
     let chunked = rechunk(sh, &rootfs, &dir)?;
     let args = [
         format!("--build-context=chunked=container-image://{chunked}"),
@@ -386,7 +413,7 @@ fn build_image(sh: &Shell, build: &Build, image: &images::Image, target: &Path) 
     // build push.
     build
         .without_cache_to()
-        .build(sh, &name, &dir, target, &args)?;
+        .build(sh, image, &dir, target, &args)?;
     Ok(())
 }
 
