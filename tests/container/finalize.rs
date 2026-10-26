@@ -203,6 +203,21 @@ fn initramfs_resolves_users_through_nss_systemd() -> Result<()> {
     Ok(())
 }
 
+/// systemd-cryptsetup requires these TSS2 libraries in the initrd to
+/// unlock the root partition with the TPM.
+fn initramfs_includes_tpm2_libraries() -> Result<()> {
+    let paths = initramfs_paths()?;
+    for library in ["libtss2-esys.so", "libtss2-tcti-device.so"] {
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.contains(&format!("/{library}"))),
+            "no {library} in the initramfs"
+        );
+    }
+    Ok(())
+}
+
 fn queries_packages_from_moved_database() -> Result<()> {
     let distro = distro::detect(&fs_utf8::Dir::from_cap_std(ROOT.try_clone()?))?;
     let bash: PackageName = "bash".parse()?;
@@ -226,5 +241,6 @@ pub(crate) const TESTS: &[IntegrationTest] = &[
     integration_test!(removes_machine_identity),
     integration_test!(boots_from_uki),
     integration_test!(initramfs_resolves_users_through_nss_systemd),
+    integration_test!(initramfs_includes_tpm2_libraries),
     integration_test!(queries_packages_from_moved_database),
 ];
