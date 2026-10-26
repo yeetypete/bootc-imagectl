@@ -75,7 +75,8 @@ enroll. This needs sbsigntools in the image.
 
 To enroll the key, put the firmware in setup mode, then pick
 *Enroll Secure Boot keys: auto* in the boot menu. This replaces the firmware's
-keys, including Microsoft's.
+keys. By default Microsoft's certificates will also be enrolled.
+`finalize --secureboot-no-microsoft` enrolls only your certificate.
 
 ## Installing
 
