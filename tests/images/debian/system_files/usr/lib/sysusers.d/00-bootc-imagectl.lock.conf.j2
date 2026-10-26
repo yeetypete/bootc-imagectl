@@ -21,6 +21,9 @@ u messagebus 988 "System Message Bus" /nonexistent /usr/sbin/nologin
 # package: polkitd
 g polkitd 987
 u polkitd 987 "User for polkitd" / /usr/sbin/nologin
+# package: tpm-udev
+g tss 986
+u tss 986 "tss user for tpm2" / /usr/sbin/nologin
 {% if not homed %}
 # package: -
 u debian 1000 "Debian user" /home/debian /bin/bash

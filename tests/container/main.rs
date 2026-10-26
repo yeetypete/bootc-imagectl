@@ -9,6 +9,7 @@ mod fedora;
 mod finalize;
 mod homed;
 mod regular_user;
+mod secureboot;
 
 fn main() {
     testing::run(&[
@@ -19,5 +20,6 @@ fn main() {
         finalize::TESTS,
         homed::TESTS,
         regular_user::TESTS,
+        secureboot::TESTS,
     ]);
 }
