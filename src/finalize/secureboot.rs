@@ -1,48 +1,58 @@
 //! Sign systemd-boot for Secure Boot and stage the keys systemd-boot enrolls.
 //!
-//! `bootctl install` copies `systemd-boot*.efi.signed` to the ESP in place of
-//! the unsigned binary next to it, see bootctl(1). bootc copies the keys to
-//! `loader/keys` on the ESP, from where systemd-boot enrolls them on a machine
-//! in setup mode, see loader.conf(5).
+//! Signing uses sbsigntools. `bootctl install` copies
+//! `systemd-boot*.efi.signed` to the ESP in place of the unsigned binary next
+//! to it, see bootctl(1). bootc copies the keys to `loader/keys` on the ESP,
+//! from where systemd-boot enrolls them on a machine in setup mode, see
+//! loader.conf(5).
 
 use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
 use cap_std_ext::camino::{Utf8Path, Utf8PathBuf};
-use cap_std_ext::cap_std::ambient_authority;
 use cap_std_ext::cap_std::fs_utf8::Dir;
 use cap_std_ext::dirext::CapStdExtDirExtUtf8;
-use tracing::{debug, info};
+use tracing::info;
+use uuid::{Uuid, uuid};
 
 use crate::cli::SecureBootOpts;
 use crate::command::CommandRunExt;
-use crate::fs::copy_dir;
-
-/// The oldest systemd whose bootctl supports `--secure-boot-auto-enroll`.
-const MIN_VERSION: u32 = 257;
 
 /// Where systemd-boot's EFI binaries are.
 const SYSTEMD_BOOT_DIR: &str = "usr/lib/systemd/boot/efi";
 
-/// The signing tool. Fedora and Arch ship it in systemd, Debian and Ubuntu
-/// in systemd-repart.
-const SBSIGN: &str = "usr/lib/systemd/systemd-sbsign";
+/// The sbsigntools commands signing needs, in /usr/bin.
+const TOOLS: [&str; 2] = ["sbsign", "sbvarsign"];
 
 /// Where bootc copies the keys to the ESP from.
 const KEYS_DIR: &str = "usr/lib/bootc/install/secureboot-keys/auto";
 
-/// Sign systemd-boot and stage the certificate for enrollment, given the
-/// image's systemd version.
+/// The owner of each signature list entry, which the firmware ignores.
+const OWNER_GUID: [u8; 16] = Uuid::nil().to_bytes_le();
+
+/// The type GUID of an X.509 certificate in an EFI signature list.
+const X509_GUID: [u8; 16] = uuid!("a5c059a1-94e4-4aa7-87b5-ab155c2bf072").to_bytes_le();
+
+/// The variable attributes sbvarsign signs. They must equal the attributes
+/// systemd-boot enrolls the variables with, because the signature in each
+/// .auth file covers the attributes.
+const ATTRIBUTES: &str = "NON_VOLATILE,BOOTSERVICE_ACCESS,RUNTIME_ACCESS";
+
+/// The variables systemd-boot enrolls.
+const VARIABLES: [&str; 3] = ["PK", "KEK", "db"];
+
+/// Sign systemd-boot and stage the certificate for enrollment.
 ///
 /// # Errors
 ///
-/// Fails if the image's systemd is too old, the image lacks systemd-boot or
-/// the signing tool, or signing fails.
-pub(super) fn finalize(root: &Dir, opts: &SecureBootOpts, systemd: u32) -> Result<()> {
-    ensure!(
-        systemd >= MIN_VERSION,
-        "the image has systemd {systemd} but Secure Boot needs systemd {MIN_VERSION} or newer"
-    );
+/// Fails if the image lacks systemd-boot or a signing tool, or signing fails.
+pub(super) fn finalize(root: &Dir, opts: &SecureBootOpts) -> Result<()> {
+    for tool in TOOLS {
+        ensure!(
+            root.is_file(format!("usr/bin/{tool}")),
+            "the image lacks /usr/bin/{tool}. help: install sbsigntool on Debian and Ubuntu, or sbsigntools on Fedora and Arch"
+        );
+    }
     sign_systemd_boot(root, &opts.private_key, &opts.certificate)?;
     write_keys(root, &opts.private_key, &opts.certificate)
 }
@@ -69,61 +79,88 @@ fn systemd_boot_binaries(root: &Dir) -> Result<Vec<Utf8PathBuf>> {
 /// Write a signed copy of each systemd-boot binary next to it, replacing one
 /// a package shipped.
 fn sign_systemd_boot(root: &Dir, key: &Utf8Path, cert: &Utf8Path) -> Result<()> {
-    ensure!(
-        root.is_file(SBSIGN),
-        "the image lacks /{SBSIGN}. help: install it, e.g. from systemd-ukify on Fedora or systemd-repart on Debian and Ubuntu"
-    );
     for unsigned in systemd_boot_binaries(root)? {
         let signed = format!("{unsigned}.signed");
         root.remove_file_optional(&signed)
             .with_context(|| format!("removing /{signed}"))?;
         info!("signing /{unsigned}");
-        Command::new(format!("/{SBSIGN}"))
-            .arg("sign")
-            .arg(format!("--private-key={key}"))
-            .arg(format!("--certificate={cert}"))
-            .arg(format!("--output=/{signed}"))
+        Command::new("sbsign")
+            .arg("--key")
+            .arg(key)
+            .arg("--cert")
+            .arg(cert)
+            .arg("--output")
+            .arg(format!("/{signed}"))
             .arg(format!("/{unsigned}"))
             .run_get_string()?;
     }
     Ok(())
 }
 
-/// Write `cert` as the PK, KEK and db, signed by `key`. bootctl writes them
-/// to a scratch ESP, from where they are copied into the image.
+/// Write `cert` as the PK, KEK and db, signed by `key`, for systemd-boot to
+/// enroll.
 fn write_keys(root: &Dir, key: &Utf8Path, cert: &Utf8Path) -> Result<()> {
-    let esp = tempfile::Builder::new()
-        .prefix("bootc-imagectl-esp-")
+    let tmp = tempfile::Builder::new()
+        .prefix("bootc-imagectl-keys-")
         .tempdir()
-        .context("creating a scratch ESP")?;
-    let output = Command::new("bootctl")
-        .args([
-            "install",
-            "--no-variables",
-            // Only the keys are kept from the scratch ESP.
-            "--random-seed=no",
-            "--secure-boot-auto-enroll=yes",
-        ])
-        .arg(format!("--private-key={key}"))
-        .arg(format!("--certificate={cert}"))
-        // Unlike --esp-path, this skips the check that the ESP is a mount.
-        .env("SYSTEMD_ESP_PATH", esp.path())
-        .run_get_string()?;
-    debug!("bootctl install: {output}");
+        .context("creating a scratch directory")?;
+    let scratch = Utf8Path::from_path(tmp.path()).context("the scratch path is not UTF-8")?;
+    let pem = std::fs::read(cert).with_context(|| format!("reading {cert}"))?;
+    let der = to_der(&pem).with_context(|| format!("reading {cert}"))?;
+    let list = scratch.join("cert.esl");
+    std::fs::write(&list, signature_list(OWNER_GUID, &der))
+        .with_context(|| format!("writing {list}"))?;
 
-    let esp = Dir::open_ambient_dir(
-        Utf8Path::from_path(esp.path()).context("the scratch ESP path is not UTF-8")?,
-        ambient_authority(),
-    )?;
-    let from = esp
-        .open_dir("loader/keys/auto")
-        .context("opening the keys bootctl wrote")?;
     root.create_dir_all(KEYS_DIR)
         .with_context(|| format!("creating /{KEYS_DIR}"))?;
-    copy_dir(&from, &root.open_dir(KEYS_DIR)?)
-        .with_context(|| format!("copying the keys to /{KEYS_DIR}"))?;
+    for variable in VARIABLES {
+        Command::new("sbvarsign")
+            .arg("--key")
+            .arg(key)
+            .arg("--cert")
+            .arg(cert)
+            .args(["--attr", ATTRIBUTES, "--output"])
+            .arg(format!("/{KEYS_DIR}/{variable}.auth"))
+            .arg(variable)
+            .arg(&list)
+            .run_get_string()?;
+    }
     info!("wrote the Secure Boot keys to /{KEYS_DIR}");
     Ok(())
+}
+
+/// The DER form of the PEM certificate `pem`.
+fn to_der(pem: &[u8]) -> Result<Vec<u8>> {
+    let pem = pem::parse(pem).context("parsing PEM")?;
+    ensure!(
+        pem.tag() == "CERTIFICATE",
+        "found a {} instead of a certificate",
+        pem.tag()
+    );
+    Ok(pem.into_contents())
+}
+
+/// The EFI signature list of the DER certificate `cert`, owned by `owner`:
+/// the list header, then the owner and the certificate. See
+/// `EFI_SIGNATURE_LIST` in
+/// <https://github.com/tianocore/edk2/blob/master/MdePkg/Include/Guid/ImageAuthentication.h>.
+fn signature_list(owner: [u8; 16], cert: &[u8]) -> Vec<u8> {
+    const HEADER: usize = 16 + 3 * 4;
+    let signature_size = owner.len() + cert.len();
+    let size = |n: usize| {
+        u32::try_from(n)
+            .expect("a certificate under 4 GiB")
+            .to_le_bytes()
+    };
+    let mut list = Vec::with_capacity(HEADER + signature_size);
+    list.extend(X509_GUID);
+    list.extend(size(HEADER + signature_size));
+    // No signature header.
+    list.extend(0u32.to_le_bytes());
+    list.extend(size(signature_size));
+    list.extend(owner);
+    list.extend(cert);
+    list
 }
 
 #[cfg(test)]
@@ -152,6 +189,36 @@ mod tests {
             ]
         );
         Ok(())
+    }
+
+    #[test]
+    fn converts_certificate_to_der() -> Result<()> {
+        let pem = b"-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----\n";
+        assert_eq!(to_der(pem)?, [1, 2, 3]);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_other_pem() {
+        let pem = b"-----BEGIN PRIVATE KEY-----\nAQID\n-----END PRIVATE KEY-----\n";
+        let err = to_der(pem).unwrap_err().to_string();
+        assert!(
+            err.contains("PRIVATE KEY instead of a certificate"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn builds_signature_list() {
+        let list = signature_list(OWNER_GUID, b"cert");
+        assert_eq!(list.len(), 48);
+        assert_eq!(list[..16], X509_GUID);
+        // UEFI stores the first three fields of a GUID little-endian.
+        assert_eq!(list[..8], [0xa1, 0x59, 0xc0, 0xa5, 0xe4, 0x94, 0xa7, 0x4a]);
+        // The list, header and signature sizes.
+        assert_eq!(list[16..28], [48, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0]);
+        assert_eq!(list[28..44], OWNER_GUID);
+        assert_eq!(&list[44..], b"cert");
     }
 
     #[test]

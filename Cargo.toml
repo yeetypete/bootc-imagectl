@@ -59,6 +59,7 @@ cap-std-ext = { version = "5", features = ["fs_utf8"] }
 clap = { workspace = true }
 flate2 = "1"
 libtest-mimic = { version = "0.8", optional = true }
+pem = "4"
 rpassword = "7"
 rustix = { version = "1", features = ["mount", "process", "time"] }
 serde = { workspace = true }
@@ -67,6 +68,7 @@ tempfile = "3"
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", default-features = false }
 uzers = { version = "0.12", default-features = false, features = ["cache"] }
 which = "8"
 

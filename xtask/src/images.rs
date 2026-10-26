@@ -23,10 +23,6 @@ const HOMED_EXAMPLES: &[&str] = &["ubuntu-desktop", "ubuntu-transient-etc"];
 /// The test images built without the homed variant.
 const NO_HOMED_IMAGES: &[&str] = &["ubuntu-24.04"];
 
-/// The test images built without the Secure Boot variant, whose systemd is
-/// older than finalize's Secure Boot signing needs.
-const NO_SECURE_BOOT_IMAGES: &[&str] = &["ubuntu-24.04"];
-
 /// The examples with a transient /etc.
 const TRANSIENT_ETC_EXAMPLES: &[&str] = &["ubuntu-transient-etc"];
 
@@ -206,8 +202,7 @@ pub(crate) fn images(root: &Path, sources: &[Source]) -> Result<Vec<Image>> {
     for &source in sources {
         for name in names(&root.join(source.dir()))? {
             let variants = source.variants().iter().filter(|variant| {
-                !(variant.is_homed() && NO_HOMED_IMAGES.contains(&name.as_str())
-                    || variant.has_secure_boot() && NO_SECURE_BOOT_IMAGES.contains(&name.as_str()))
+                !(variant.is_homed() && NO_HOMED_IMAGES.contains(&name.as_str()))
             });
             images.extend(variants.map(|&variant| Image {
                 name: name.clone(),

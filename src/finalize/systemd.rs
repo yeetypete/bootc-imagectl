@@ -10,9 +10,8 @@ use crate::command::CommandRunExt;
 /// `systemd-sysusers --tldr` from systemd 255.
 const MIN_VERSION: u32 = 255;
 
-/// The major version of the image's systemd. Fails if it is older than
-/// [`MIN_VERSION`].
-pub(super) fn check() -> Result<u32> {
+/// Fail if the image's systemd is older than [`MIN_VERSION`].
+pub(super) fn check() -> Result<()> {
     let output = Command::new("systemctl")
         .arg("--version")
         .run_get_string()?;
@@ -21,7 +20,7 @@ pub(super) fn check() -> Result<u32> {
         version >= MIN_VERSION,
         "the image has systemd {version} but bootc-imagectl needs systemd {MIN_VERSION} or newer"
     );
-    Ok(version)
+    Ok(())
 }
 
 /// The major version in `systemctl --version` output, e.g. 259 in

@@ -46,7 +46,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     let root = Dir::open_ambient_dir("/", ambient_authority()).context("opening /")?;
     let distro = distro::detect(&root).context("detecting the distribution")?;
     info!("finalizing a {} rootfs", distro.name());
-    let systemd = systemd::check().context("checking the systemd version")?;
+    systemd::check().context("checking the systemd version")?;
 
     // First, so that the later steps see which units the system boots with.
     presets::finalize(&root).context("applying the preset policy")?;
@@ -60,7 +60,7 @@ pub fn finalize(opts: &FinalizeOpts) -> Result<()> {
     }
     initramfs::finalize(&root, distro).context("building the initramfs")?;
     if let Some(secure_boot) = &opts.secure_boot {
-        secureboot::finalize(&root, secure_boot, systemd).context("signing for Secure Boot")?;
+        secureboot::finalize(&root, secure_boot).context("signing for Secure Boot")?;
     }
     identity::finalize(&root, distro).context("removing the machine identity")?;
     layout::finalize(&root).context("laying out the filesystem")?;
