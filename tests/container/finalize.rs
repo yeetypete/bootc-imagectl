@@ -33,7 +33,7 @@ pub(crate) fn var_tmpfiles() -> Result<String> {
 }
 
 /// The path of the image's UKI.
-fn uki() -> Result<String> {
+pub(crate) fn uki() -> Result<String> {
     let [name] = names("boot/EFI/Linux")?.try_into().expect("one UKI");
     Ok(format!("/boot/EFI/Linux/{}", name.display()))
 }

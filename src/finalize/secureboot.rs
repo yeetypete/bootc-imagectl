@@ -33,10 +33,9 @@ const OWNER_GUID: [u8; 16] = Uuid::nil().to_bytes_le();
 /// The signature type of an X.509 certificate, `EFI_CERT_X509_GUID`.
 const X509_GUID: [u8; 16] = uuid!("a5c059a1-94e4-4aa7-87b5-ab155c2bf072").to_bytes_le();
 
-/// The attributes the UEFI specification requires for PK, KEK and db, which
-/// the signature in each .auth file covers. sbvarsign always adds
-/// `TIME_BASED_AUTHENTICATED_WRITE_ACCESS`, which is also required.
-const ATTRIBUTES: &str = "NON_VOLATILE,BOOTSERVICE_ACCESS,RUNTIME_ACCESS";
+/// The attributes the UEFI specification requires for PK, KEK and db.
+const ATTRIBUTES: &str =
+    "NON_VOLATILE,RUNTIME_ACCESS,BOOTSERVICE_ACCESS,TIME_BASED_AUTHENTICATED_WRITE_ACCESS";
 
 /// The signature owner of Microsoft's certificates.
 const MICROSOFT_GUID: [u8; 16] = uuid!("77fa9abd-0359-4d32-bd60-28f4e78f784b").to_bytes_le();
@@ -162,7 +161,8 @@ fn write_keys(root: &Dir, opts: &SecureBootOpts) -> Result<()> {
 /// Each holds a signature list of the DER certificate `cert`. With
 /// `microsoft`, KEK and db also hold signature lists of Microsoft's
 /// certificates.
-fn signature_databases(cert: &[u8], microsoft: bool) -> [(&'static str, Vec<u8>); 3] {
+#[must_use]
+pub fn signature_databases(cert: &[u8], microsoft: bool) -> [(&'static str, Vec<u8>); 3] {
     let own = signature_list(OWNER_GUID, cert);
     let with = |certs: &[&[u8]]| {
         let mut database = own.clone();
@@ -275,21 +275,21 @@ mod tests {
 
     #[test]
     fn adds_microsoft_certificates_to_kek_and_db() {
-        let databases = signature_databases(b"cert", true);
         let own = signature_list(OWNER_GUID, b"cert");
-        let owners = |database: &[u8]| {
-            database
-                .windows(16)
-                .filter(|window| *window == MICROSOFT_GUID)
-                .count()
+        let microsoft = |certs: &[&[u8]]| -> Vec<u8> {
+            certs
+                .iter()
+                .flat_map(|cert| signature_list(MICROSOFT_GUID, cert))
+                .collect()
         };
-        assert_eq!(databases[0], ("PK", own.clone()));
-        assert_eq!(databases[1].0, "KEK");
-        assert!(databases[1].1.starts_with(&own));
-        assert_eq!(owners(&databases[1].1), MICROSOFT_KEK.len());
-        assert_eq!(databases[2].0, "db");
-        assert!(databases[2].1.starts_with(&own));
-        assert_eq!(owners(&databases[2].1), MICROSOFT_DB.len());
+        assert_eq!(
+            signature_databases(b"cert", true),
+            [
+                ("PK", own.clone()),
+                ("KEK", [own.clone(), microsoft(&MICROSOFT_KEK)].concat()),
+                ("db", [own, microsoft(&MICROSOFT_DB)].concat()),
+            ]
+        );
     }
 
     #[test]

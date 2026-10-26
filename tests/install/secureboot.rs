@@ -1,38 +1,58 @@
 //! Check that the installed system booted with Secure Boot on.
 
 use std::fs;
+use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use bootc_imagectl::finalize::signature_databases;
 use bootc_imagectl::testing::{Feature, IntegrationTest, Requirement, integration_test};
-use uuid::uuid;
 
-/// The `SecureBoot` EFI variable.
-const SECURE_BOOT: &str =
-    "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c";
+/// The directory the kernel exposes the EFI variables in.
+const EFIVARS: &str = "/sys/firmware/efi/efivars";
 
-/// The KEK and db EFI variables.
-const KEK: &str = "/sys/firmware/efi/efivars/KEK-8be4df61-93ca-11d2-aa0d-00e098032b8c";
-const DB: &str = "/sys/firmware/efi/efivars/db-d719b2cb-3d3a-4596-a3bc-dad00e67656f";
+/// The vendor GUID of the PK, KEK and `SecureBoot` variables.
+const GLOBAL_VARIABLE: &str = "8be4df61-93ca-11d2-aa0d-00e098032b8c";
 
-/// The owner of Microsoft's certificates in a signature list.
-const MICROSOFT_GUID: [u8; 16] = uuid!("77fa9abd-0359-4d32-bd60-28f4e78f784b").to_bytes_le();
+/// The vendor GUID of the db variable.
+const IMAGE_SECURITY_DATABASE: &str = "d719b2cb-3d3a-4596-a3bc-dad00e67656f";
 
-/// Secure Boot is on if the byte after the variable's 4-byte attributes
-/// is 1.
+/// The certificate xtask signs the test images with, relative to the target
+/// directory the test binary runs from.
+const CERTIFICATE: &str = "secureboot/public/secureboot-certificate.pem";
+
+/// The contents of the EFI variable `name`, after its 4-byte attributes.
+fn variable(name: &str) -> Result<Vec<u8>> {
+    let guid = if name == "db" {
+        IMAGE_SECURITY_DATABASE
+    } else {
+        GLOBAL_VARIABLE
+    };
+    Ok(fs::read(format!("{EFIVARS}/{name}-{guid}"))?.split_off(4))
+}
+
+/// The DER form of the certificate the image was signed with.
+fn certificate() -> Result<Vec<u8>> {
+    let binary = std::env::current_exe()?;
+    let target = binary
+        .parent()
+        .and_then(Path::parent)
+        .context("finding the target directory")?;
+    let pem = pem::parse(fs::read(target.join(CERTIFICATE))?)?;
+    assert_eq!(pem.tag(), "CERTIFICATE");
+    Ok(pem.into_contents())
+}
+
+/// Secure Boot is enabled.
 fn boots_with_secure_boot() -> Result<()> {
-    assert_eq!(fs::read(SECURE_BOOT)?.get(4), Some(&1));
+    assert_eq!(variable("SecureBoot")?, [1]);
     Ok(())
 }
 
-/// systemd-boot enrolled Microsoft's certificates next to ours.
-fn enrolls_microsoft_certificates() -> Result<()> {
-    for variable in [KEK, DB] {
-        let data = fs::read(variable)?;
-        assert!(
-            data.windows(MICROSOFT_GUID.len())
-                .any(|window| window == MICROSOFT_GUID),
-            "{variable}"
-        );
+/// The firmware enrolled the PK, KEK and db finalize wrote, with the
+/// image's certificate and Microsoft's.
+fn enrolls_signature_databases() -> Result<()> {
+    for (name, database) in signature_databases(&certificate()?, true) {
+        assert!(variable(name)? == database, "{name} differs");
     }
     Ok(())
 }
@@ -41,5 +61,5 @@ const REQUIRES: &[Requirement] = &[Requirement::Feature(Feature::SecureBoot)];
 
 pub(crate) const TESTS: &[IntegrationTest] = &[
     integration_test!(boots_with_secure_boot, REQUIRES),
-    integration_test!(enrolls_microsoft_certificates, REQUIRES),
+    integration_test!(enrolls_signature_databases, REQUIRES),
 ];

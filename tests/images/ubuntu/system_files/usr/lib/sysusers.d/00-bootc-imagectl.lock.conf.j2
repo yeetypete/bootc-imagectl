@@ -20,6 +20,9 @@ u messagebus 991 "System Message Bus" /nonexistent /usr/sbin/nologin
 # package: polkitd
 g polkitd 990
 u polkitd 990 "User for polkitd" / /usr/sbin/nologin
+# package: tpm-udev
+g tss 989
+u tss 989 "tss user for tpm2" / /usr/sbin/nologin
 {% if not homed %}
 # package: -
 g ubuntu 1000

@@ -160,15 +160,15 @@ impl Build {
 /// generated in `target` on first use.
 fn secureboot_key(sh: &Shell, target: &Path) -> Result<(PathBuf, PathBuf)> {
     let dir = target.join("secureboot");
-    let key = dir.join("secureboot.key");
-    let cert = dir.join("public").join("secureboot.crt");
+    let key = dir.join("secureboot-private-key.pem");
+    let cert = dir.join("public").join("secureboot-certificate.pem");
     if !cert.exists() {
         sh.create_dir(dir.join("public"))?;
-        let tmp_key = dir.join("secureboot.key.tmp");
-        let tmp_cert = dir.join("secureboot.crt.tmp");
+        let tmp_key = dir.join("secureboot-private-key.pem.tmp");
+        let tmp_cert = dir.join("secureboot-certificate.pem.tmp");
         cmd!(
             sh,
-            "openssl req -quiet -newkey rsa:2048 -nodes -keyout {tmp_key} -x509 -sha256 -days 3650 -subj /CN=bootc-imagectl-test/ -out {tmp_cert}"
+            "openssl req -quiet -newkey rsa:2048 -nodes -keyout {tmp_key} -new -x509 -sha256 -days 3650 -subj /CN=bootc-imagectl-test/ -out {tmp_cert}"
         )
         .run()?;
         std::fs::rename(tmp_key, &key)?;
