@@ -33,9 +33,9 @@ const OWNER_GUID: [u8; 16] = Uuid::nil().to_bytes_le();
 /// The type GUID of an X.509 certificate in an EFI signature list.
 const X509_GUID: [u8; 16] = uuid!("a5c059a1-94e4-4aa7-87b5-ab155c2bf072").to_bytes_le();
 
-/// The variable attributes sbvarsign signs. They must equal the attributes
-/// systemd-boot enrolls the variables with, because the signature in each
-/// .auth file covers the attributes.
+/// The attributes the UEFI specification requires for PK, KEK and db, which
+/// the signature in each .auth file covers. sbvarsign always adds
+/// TIME_BASED_AUTHENTICATED_WRITE_ACCESS, which is also required.
 const ATTRIBUTES: &str = "NON_VOLATILE,BOOTSERVICE_ACCESS,RUNTIME_ACCESS";
 
 /// The variables systemd-boot enrolls.
