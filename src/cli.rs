@@ -80,6 +80,13 @@ pub struct SecureBootOpts {
     /// The certificate of --secureboot-private-key, in PEM form.
     #[arg(long = "secureboot-certificate", value_name = "PATH", required = false)]
     pub certificate: Utf8PathBuf,
+
+    /// Enroll only the certificate, without Microsoft's.
+    ///
+    /// Warning: firmware drivers Microsoft signed, such as those of graphics
+    /// cards, may fail to load.
+    #[arg(long = "secureboot-no-microsoft")]
+    pub no_microsoft: bool,
 }
 
 /// Options for `install`.
