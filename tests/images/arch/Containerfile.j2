@@ -131,11 +131,9 @@ FROM chunked AS uki
 
 {% if secureboot %}
 # The UKI is signed with the same key as systemd-boot. Its expected PCR 11
-# values in the initrd are also signed (--sign-initrd-pcrs), so the TPM
-# releases the root's encryption key only to UKIs signed with this key, and
-# only in the initrd. The other signatures cover every boot phase, so the root
-# must be bound with --tpm2-public-key-policyref=initrd. systemd 262 also
-# requires this for its NvPCRs.
+# values are also signed, so the TPM releases the root's encryption key only
+# to UKIs signed with this key, and only in the initrd. systemd 262 also
+# requires --sign-initrd-pcrs for its NvPCRs.
 {% endif %}
 RUN --mount=type=bind,from=chunked,target=/target \
     --mount=type=bind,from=finalized,source=/usr/lib/modules,target=/kernel \
@@ -151,6 +149,7 @@ RUN --mount=type=bind,from=chunked,target=/target \
       --signtool sbsign \
       --pcr-banks sha256 \
       --pcr-private-key /run/secrets/secureboot_key \
+      --phases enter-initrd \
       --sign-initrd-pcrs \
       --secureboot-private-key /run/secrets/secureboot_key \
       --secureboot-certificate /run/secureboot-certificate.pem \
