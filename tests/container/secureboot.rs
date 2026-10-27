@@ -25,7 +25,7 @@ struct Section {
     text: String,
 }
 
-/// The `.pcrsig` signatures for the sha256 bank, one per boot phase.
+/// The `.pcrsig` signatures for the sha256 bank.
 #[derive(Debug, Deserialize)]
 struct PcrSignatures {
     sha256: Vec<PcrSignature>,
@@ -35,15 +35,13 @@ struct PcrSignatures {
 #[derive(Debug, Deserialize)]
 struct PcrSignature {
     pcrs: Vec<u32>,
-    /// The policy reference, such as `initrd`.
-    #[serde(rename = "ref")]
-    policyref: Option<String>,
+    /// The TPM2 policy digest of the expected PCR values.
+    #[serde(rename = "pol")]
+    policy_digest: String,
 }
 
 /// The UKI carries the public key and signatures of its expected PCR 11
-/// values. One of them is valid only in the initrd, so that the root can be
-/// bound to it. systemd 262 and later mark it with the `initrd` policy
-/// reference. Older versions sign only the initrd phase.
+/// values, all for the initrd alone.
 fn signs_pcr_policy() -> Result<()> {
     let sections: PcrSections = Command::new("ukify")
         .arg("inspect")
@@ -60,11 +58,12 @@ fn signs_pcr_policy() -> Result<()> {
     let signatures = serde_json::from_str::<PcrSignatures>(&sections.pcrsig.text)?.sha256;
     assert!(!signatures.is_empty());
     assert!(signatures.iter().all(|signature| signature.pcrs == [11]));
-    let initrd = signatures
-        .iter()
-        .filter(|signature| signature.policyref.as_deref() == Some("initrd"))
-        .count();
-    assert!(initrd == 1 || signatures.len() == 1, "{signatures:?}");
+    assert!(
+        signatures
+            .iter()
+            .all(|signature| signature.policy_digest == signatures[0].policy_digest),
+        "{signatures:?}"
+    );
     Ok(())
 }
 
