@@ -110,8 +110,8 @@ jobs:
 
       - name: Install VM tools
         env:
-          BCVK_VERSION: 0.21.0
-          BCVK_SHA256: 3135cc59b8971193b49be6cbaee12b789391ac6e6ab5ed3edf17082b03f144dd
+          BCVK_VERSION: 0.22.0
+          BCVK_SHA256: eb72198c0d36fab75bfcadbb6794a87afa6f496a4da6b1b34d27728243fa6474
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y qemu-system-x86 \
